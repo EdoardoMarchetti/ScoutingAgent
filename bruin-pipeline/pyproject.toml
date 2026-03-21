@@ -2,13 +2,14 @@
 name = "bruin-pipeline"
 version = "0.1.0"
 requires-python = ">=3.11"
-description = "Deps for Bruin Python assets. wyscout.py (repo root) needs: pandas, requests, tqdm, python-dotenv. bronze/br_seasons adds google-cloud-bigquery."
+description = "Deps for Bruin Python assets. wyscout.py (repo root) needs: pandas, requests, tqdm, python-dotenv. Dimension assets add google-cloud-bigquery and google-cloud-storage."
 dependencies = [
     # wyscout.py (imports)
     "pandas>=2.0.0",
     "python-dotenv>=1.0.0",
     "requests>=2.28.0",
     "tqdm>=4.66.0",
-    # bronze/br_seasons.py (BigQuery read of bronze_competition)
+    # assets/dimension/dim_seasons.py (BigQuery read of dim_competition)
     "google-cloud-bigquery>=3.25.0",
+    "google-cloud-storage>=2.18.0",
 ]

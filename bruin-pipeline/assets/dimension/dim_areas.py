@@ -1,5 +1,5 @@
 """@bruin
-name: scouting_agent.bronze_area
+name: scouting_agent.dim_area
 type: python
 image: python:3.12
 connection: gcp
@@ -41,7 +41,7 @@ load_dotenv(_ROOT / ".env")
 
 import wyscout  # noqa: E402
 
-from wyscout_bronze_scope import get_season_chain_cached, optional_season_id  # noqa: E402
+from wyscout_dimension_scope import get_season_chain_cached, optional_season_id  # noqa: E402
 
 
 def materialize():

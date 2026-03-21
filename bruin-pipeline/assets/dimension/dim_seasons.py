@@ -1,11 +1,11 @@
 """@bruin
-name: scouting_agent.bronze_season
+name: scouting_agent.dim_season
 type: python
 image: python:3.12
 connection: gcp
 
 depends:
-  - scouting_agent.bronze_competition
+  - scouting_agent.dim_competition
 
 materialization:
   type: table
@@ -48,7 +48,7 @@ load_dotenv(_ROOT / ".env")
 
 import wyscout  # noqa: E402
 
-from wyscout_bronze_scope import (  # noqa: E402
+from wyscout_dimension_scope import (  # noqa: E402
     active_from_season,
     bq_client,
     get_season_chain_cached,
@@ -69,24 +69,6 @@ def _as_item_list(payload: object, keys: tuple[str, ...]) -> list:
     return []
 
 
-def _read_project_id() -> str:
-    text = (_ROOT / ".bruin.yml").read_text(encoding="utf-8")
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("project_id:"):
-            return s.split(":", 1)[1].strip().strip("\"'")
-    raise RuntimeError("project_id not found in .bruin.yml")
-
-
-def _bq_client() -> bigquery.Client:
-    key_path = _ROOT / ".secrets" / "bruin-wyscout-elt.json"
-    if not key_path.is_file():
-        raise RuntimeError(f"Service account file not found: {key_path}")
-    creds = service_account.Credentials.from_service_account_file(str(key_path))
-    project = _read_project_id()
-    return bigquery.Client(credentials=creds, project=project)
-
-
 def _as_str(v: object) -> str | None:
     if v is None:
         return None
@@ -105,13 +87,13 @@ def materialize():
     project = client.project
     query = f"""
         SELECT DISTINCT competition_id
-        FROM `{project}.scouting_agent.bronze_competition`
+        FROM `{project}.scouting_agent.dim_competition`
         ORDER BY competition_id
     """
     job = client.query(query)
     comp_ids = [int(r[0]) for r in job.result()]
     if not comp_ids:
-        raise RuntimeError("bronze_competition is empty; run bronze_competition first.")
+        raise RuntimeError("dim_competition is empty; run dim_competition first.")
 
     rows: list[dict] = []
     for comp_id in comp_ids:

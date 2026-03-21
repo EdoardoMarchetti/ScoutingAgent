@@ -575,6 +575,24 @@ def get_matches_list_by_team(teamId, version='v3'):
     return call_api(url=url)
 
 
+def _events_array_from_match_events_response(response):
+    """
+    Wyscout v3: ``{"events": [...], "meta": ...}``.
+    Legacy shape: ``{"elements": [{"events": [...], ...}]}``.
+    """
+    if not isinstance(response, dict):
+        return []
+    ev = response.get("events")
+    if isinstance(ev, list):
+        return ev
+    elements = response.get("elements") or []
+    if elements and isinstance(elements[0], dict):
+        inner = elements[0].get("events")
+        if isinstance(inner, list):
+            return inner
+    return []
+
+
 def get_match_events(matchId, version='v3', fetch=[], details=[], exclude=[]):
     """
     Function to retrieve events for a specific match using the Wyscout API.
@@ -625,16 +643,16 @@ def get_match_events_by_type(matchId, eventType, version='v3', fetch=[], details
     
     if all_events == -1:
         return -1
-    
-    # Extract events from the elements array
-    elements = all_events.get('elements', [])
-    if not elements:
-        return {'events': []}
-    
-    events_data = elements[0].get('events', [])
-    filtered_events = [event for event in events_data if event.get('type', {}).get('name') == eventType]
-    
-    return {'events': filtered_events}
+
+    events_data = _events_array_from_match_events_response(all_events)
+    filtered_events = [
+        event
+        for event in events_data
+        if (event.get("type") or {}).get("name") == eventType
+        or (event.get("type") or {}).get("primary") == eventType
+    ]
+
+    return {"events": filtered_events}
 
 
 def get_player_match_events(playerId, matchId, version='v3', fetch=[], details=[]):
@@ -657,16 +675,20 @@ def get_player_match_events(playerId, matchId, version='v3', fetch=[], details=[
     
     if all_events == -1:
         return -1
-    
-    # Extract events from the elements array
-    elements = all_events.get('elements', [])
-    if not elements:
-        return {'events': []}
-    
-    events_data = elements[0].get('events', [])
-    filtered_events = [event for event in events_data if event.get('playerId') == playerId]
-    
-    return {'events': filtered_events}
+
+    events_data = _events_array_from_match_events_response(all_events)
+    filtered_events = []
+    for event in events_data:
+        pl = event.get("player")
+        pid = (
+            event.get("playerId")
+            if event.get("playerId") is not None
+            else (pl.get("id") if isinstance(pl, dict) else None)
+        )
+        if pid is not None and int(pid) == int(playerId):
+            filtered_events.append(event)
+
+    return {"events": filtered_events}
 
 
 def get_match_events_summary(matchId, version='v3'):
@@ -685,40 +707,42 @@ def get_match_events_summary(matchId, version='v3'):
     
     if events == -1:
         return -1
-    
-    # Extract events from the elements array
-    elements = events.get('elements', [])
-    if not elements:
+
+    events_data = _events_array_from_match_events_response(events)
+    if not events_data:
         return {
-            'total_events': 0,
-            'events_by_type': {},
-            'events_by_team': {},
-            'events_by_period': {'1H': 0, '2H': 0, 'ET': 0, 'P': 0}
+            "total_events": 0,
+            "events_by_type": {},
+            "events_by_team": {},
+            "events_by_period": {"1H": 0, "2H": 0, "ET": 0, "P": 0},
         }
-    
-    events_data = elements[0].get('events', [])
-    
+
     summary = {
-        'total_events': len(events_data),
-        'events_by_type': {},
-        'events_by_team': {},
-        'events_by_period': {'1H': 0, '2H': 0, 'ET': 0, 'P': 0}
+        "total_events": len(events_data),
+        "events_by_type": {},
+        "events_by_team": {},
+        "events_by_period": {"1H": 0, "2H": 0, "ET": 0, "P": 0},
     }
-    
+
     for event in events_data:
-        # Count by event type
-        event_type = event.get('type', {}).get('name', 'Unknown')
-        summary['events_by_type'][event_type] = summary['events_by_type'].get(event_type, 0) + 1
-        
-        # Count by team
-        team_id = event.get('teamId', 'Unknown')
-        summary['events_by_team'][team_id] = summary['events_by_team'].get(team_id, 0) + 1
-        
-        # Count by period
-        period = event.get('period', 'Unknown')
-        if period in summary['events_by_period']:
-            summary['events_by_period'][period] += 1
-    
+        t = event.get("type") or {}
+        event_type = t.get("primary") or t.get("name") or "Unknown"
+        summary["events_by_type"][event_type] = (
+            summary["events_by_type"].get(event_type, 0) + 1
+        )
+
+        tm = event.get("team") if isinstance(event.get("team"), dict) else {}
+        team_id = tm.get("id")
+        if team_id is None:
+            team_id = event.get("teamId", "Unknown")
+        summary["events_by_team"][team_id] = (
+            summary["events_by_team"].get(team_id, 0) + 1
+        )
+
+        period = event.get("matchPeriod") or event.get("period") or "Unknown"
+        if period in summary["events_by_period"]:
+            summary["events_by_period"][period] += 1
+
     return summary
 
 

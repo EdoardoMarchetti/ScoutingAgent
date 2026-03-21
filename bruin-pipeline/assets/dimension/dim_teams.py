@@ -1,11 +1,11 @@
 """@bruin
-name: scouting_agent.bronze_team
+name: scouting_agent.dim_team
 type: python
 image: python:3.12
 connection: gcp
 
 depends:
-  - scouting_agent.bronze_season
+  - scouting_agent.dim_season
 
 materialization:
   type: table
@@ -62,7 +62,7 @@ load_dotenv(_ROOT / ".env")
 
 import wyscout  # noqa: E402
 
-from wyscout_bronze_scope import (  # noqa: E402
+from wyscout_dimension_scope import (  # noqa: E402
     season_ids_for_monitoring,
     team_row_from_api,
     teams_from_season_teams_payload,

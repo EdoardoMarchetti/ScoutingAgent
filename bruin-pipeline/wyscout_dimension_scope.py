@@ -1,5 +1,5 @@
 """
-Helpers for Wyscout bronze Bruin assets. Not a Bruin asset (no @bruin block).
+Helpers for Wyscout dim/fact Bruin assets. Not a Bruin asset (no @bruin block).
 
 When pipeline variable ``season_id`` is set (via ``bruin run --var season_id=524``),
 assets use a minimal API chain: season details → competition details → area.
@@ -182,7 +182,7 @@ def load_single_season_chain(wyscout_mod: Any, season_id: int) -> tuple[dict, di
     area = comp.get("area") or {}
     if area.get("id") is None:
         raise RuntimeError(
-            f"Competition {cid} has no area in API response; cannot build bronze_area."
+            f"Competition {cid} has no area in API response; cannot build dim_area."
         )
 
     comp_wyid = int(comp["wyId"])
@@ -193,7 +193,7 @@ def load_single_season_chain(wyscout_mod: Any, season_id: int) -> tuple[dict, di
     )
 
 
-# --- BigQuery (shared by bronze assets) ---
+# --- BigQuery (shared by dimension assets) ---
 
 
 def read_gcp_project_id(repo_root: Path) -> str:
@@ -215,6 +215,82 @@ def bq_client(repo_root: Path):
     creds = service_account.Credentials.from_service_account_file(str(key_path))
     project = read_gcp_project_id(repo_root)
     return bigquery.Client(credentials=creds, project=project)
+
+
+def gcs_storage_client(repo_root: Path):
+    from google.cloud import storage
+    from google.oauth2 import service_account
+
+    key_path = repo_root / ".secrets" / "bruin-wyscout-elt.json"
+    if not key_path.is_file():
+        raise RuntimeError(f"Service account file not found: {key_path}")
+    creds = service_account.Credentials.from_service_account_file(str(key_path))
+    project = read_gcp_project_id(repo_root)
+    return storage.Client(credentials=creds, project=project)
+
+
+def wyscout_gcs_bucket_name() -> str:
+    """Override with env ``WYSCOUT_GCS_BUCKET``."""
+    return os.environ.get("WYSCOUT_GCS_BUCKET", "sport-data-campus-bronze")
+
+
+def wyscout_gcs_base_prefix() -> str:
+    """
+    Optional prefix inside the bucket (no leading/trailing slashes).
+    Default empty: blobs are ``competitionId=…/season_id=…/match_id=…/events.json``
+    at bucket root. Set ``WYSCOUT_GCS_BASE_PREFIX=bronze/wyscout`` to mirror
+    ``path_to_file`` in ``.bruin.yml``.
+    """
+    v = os.environ.get("WYSCOUT_GCS_BASE_PREFIX")
+    if v is not None:
+        return v.strip().strip("/")
+    return ""
+
+
+def match_events_gcs_blob_path(
+    competition_id: int, season_id: int, match_id: int, base_prefix: str
+) -> str:
+    rel = (
+        f"competitionId={competition_id}/season_id={season_id}/"
+        f"match_id={match_id}/events.json"
+    )
+    if base_prefix:
+        return f"{base_prefix}/{rel}"
+    return rel
+
+
+def fetch_match_keys_for_events(
+    client: Any, project: str, season_ids: list[int]
+) -> list[tuple[int, int, int]]:
+    """Distinct (competition_id, season_id, match_id) from dim_match for given seasons."""
+    if not season_ids:
+        return []
+    sid_list = ",".join(str(int(s)) for s in season_ids)
+    q = f"""
+        SELECT DISTINCT competition_id, season_id, match_id
+        FROM `{project}.scouting_agent.dim_match`
+        WHERE competition_id IS NOT NULL
+          AND season_id IN ({sid_list})
+        ORDER BY season_id, match_id
+    """
+    out: list[tuple[int, int, int]] = []
+    for row in client.query(q).result():
+        cid, sid, mid = int(row[0]), int(row[1]), int(row[2])
+        out.append((cid, sid, mid))
+    return out
+
+
+def upload_json_bytes_to_gcs(
+    storage_client: Any,
+    bucket_name: str,
+    blob_name: str,
+    body: bytes,
+    content_type: str = "application/json",
+) -> str:
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(body, content_type=content_type)
+    return f"gs://{bucket_name}/{blob_name}"
 
 
 # --- Fixtures / matches (season fixtures API) ---
@@ -290,6 +366,19 @@ def _maybe_int(v: Any) -> int | None:
         return int(v)
     except (TypeError, ValueError):
         return None
+
+
+def _maybe_int_coord(v: Any) -> int | None:
+    """Pitch x/y: integers in docs; API may send floats."""
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        try:
+            return int(round(float(v)))
+        except (TypeError, ValueError):
+            return None
 
 
 def _home_away_from_teams_data(src: dict) -> tuple[int | None, int | None]:
@@ -397,7 +486,7 @@ def match_row_from_wyscout(m: dict, season_id: int) -> dict | None:
 
 
 def season_ids_for_monitoring(repo_root: Path) -> list[int]:
-    """Same rule as fixtures: optional ``season_id`` var, else active rows in bronze_season."""
+    """Same rule as fixtures: optional ``season_id`` var, else active rows in dim_season."""
     sid = optional_season_id()
     if sid is not None:
         return [sid]
@@ -405,14 +494,14 @@ def season_ids_for_monitoring(repo_root: Path) -> list[int]:
     project = client.project
     q = f"""
         SELECT DISTINCT season_id
-        FROM `{project}.scouting_agent.bronze_season`
+        FROM `{project}.scouting_agent.dim_season`
         WHERE active = TRUE
         ORDER BY season_id
     """
     rows = list(client.query(q).result())
     if not rows:
         raise RuntimeError(
-            "No active seasons in bronze_season; load seasons or set season_id."
+            "No active seasons in dim_season; load seasons or set season_id."
         )
     return [int(r[0]) for r in rows]
 
@@ -478,4 +567,112 @@ def player_row_from_api(p: dict) -> dict | None:
         "role_name": role.get("name"),
         "birth_area_id": _maybe_int(ba.get("id")),
         "passport_area_id": _maybe_int(pa.get("id")),
+    }
+
+
+def download_json_from_gcs_uri(storage_client: Any, gcs_uri: str) -> dict:
+    if not gcs_uri.startswith("gs://"):
+        raise ValueError(f"Expected gs:// URI, got {gcs_uri!r}")
+    rest = gcs_uri[5:]
+    if "/" not in rest:
+        raise ValueError(f"Invalid GCS URI: {gcs_uri!r}")
+    bucket_name, blob_path = rest.split("/", 1)
+    blob = storage_client.bucket(bucket_name).blob(blob_path)
+    raw = blob.download_as_bytes()
+    return json.loads(raw.decode("utf-8"))
+
+
+def unpack_bronze_match_events_document(doc: dict) -> dict:
+    """Envelope written by bronze: ``{ payload: <Wyscout API response> }`` or raw API dict."""
+    p = doc.get("payload")
+    if isinstance(p, dict):
+        return p
+    return doc
+
+
+def events_list_from_wyscout_match_events_api(payload: dict) -> list[dict]:
+    """
+    Wyscout v3 match events: top-level ``{ "events": [...], "meta": ... }``.
+    Fallback: nested ``elements[0].events`` (older samples / other endpoints).
+    """
+    evs = payload.get("events")
+    if isinstance(evs, list):
+        return [x for x in evs if isinstance(x, dict)]
+    els = payload.get("elements")
+    if not isinstance(els, list) or not els:
+        return []
+    block = els[0]
+    if not isinstance(block, dict):
+        return []
+    evs = block.get("events")
+    if not isinstance(evs, list):
+        return []
+    return [x for x in evs if isinstance(x, dict)]
+
+
+def _optional_json_subtree(obj: Any) -> str | None:
+    if isinstance(obj, dict) and obj:
+        return json.dumps(obj, ensure_ascii=False)
+    return None
+
+
+def silver_match_event_row(
+    *,
+    match_id: int,
+    season_id: int | None,
+    competition_id: int | None,
+    source_gcs_uri: str,
+    e: dict,
+) -> dict | None:
+    """
+    Flat silver row: time, type, location, FK-style ids (team / opponent / player) for dim join,
+    JSON payloads per subtree. No denormalized names or formations (use dim_team, dim_player).
+    Possession body omitted; only ``possession_id`` for a future possession table.
+    """
+    eid = _maybe_int(e.get("id"))
+    if eid is None:
+        return None
+    t = e.get("type") if isinstance(e.get("type"), dict) else {}
+    primary = t.get("primary") or t.get("name")
+    sec = t.get("secondary")
+    sec_json: str | None
+    if isinstance(sec, list):
+        sec_json = json.dumps(sec, ensure_ascii=False)
+    else:
+        sec_json = None
+
+    loc = e.get("location") if isinstance(e.get("location"), dict) else {}
+    team = e.get("team") if isinstance(e.get("team"), dict) else {}
+    opp = e.get("opponentTeam") if isinstance(e.get("opponentTeam"), dict) else {}
+    pl = e.get("player") if isinstance(e.get("player"), dict) else {}
+
+    poss = e.get("possession") if isinstance(e.get("possession"), dict) else {}
+    possession_id = _maybe_int(poss.get("id")) if poss else None
+
+    return {
+        "match_id": int(match_id),
+        "event_id": int(eid),
+        "season_id": season_id,
+        "competition_id": competition_id,
+        "match_period": _str_or_none(e.get("matchPeriod")),
+        "minute": _maybe_int(e.get("minute")),
+        "second": _maybe_int(e.get("second")),
+        "match_timestamp": _str_or_none(e.get("matchTimestamp")),
+        "video_timestamp": _str_or_none(e.get("videoTimestamp")),
+        "related_event_id": _maybe_int(e.get("relatedEventId")),
+        "type_primary": _str_or_none(primary),
+        "type_secondary_json": sec_json,
+        "location_x": _maybe_int_coord(loc.get("x")),
+        "location_y": _maybe_int_coord(loc.get("y")),
+        "team_id": _maybe_int(team.get("id")),
+        "opponent_team_id": _maybe_int(opp.get("id")),
+        "player_id": _maybe_int(pl.get("id")),
+        "possession_id": possession_id,
+        "pass_payload": _optional_json_subtree(e.get("pass")),
+        "shot_payload": _optional_json_subtree(e.get("shot")),
+        "ground_duel_payload": _optional_json_subtree(e.get("groundDuel")),
+        "aerial_duel_payload": _optional_json_subtree(e.get("aerialDuel")),
+        "infraction_payload": _optional_json_subtree(e.get("infraction")),
+        "carry_payload": _optional_json_subtree(e.get("carry")),
+        "source_gcs_uri": source_gcs_uri,
     }

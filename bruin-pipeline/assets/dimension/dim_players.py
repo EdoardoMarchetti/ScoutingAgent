@@ -1,11 +1,11 @@
 """@bruin
-name: scouting_agent.bronze_player
+name: scouting_agent.dim_player
 type: python
 image: python:3.12
 connection: gcp
 
 depends:
-  - scouting_agent.bronze_team
+  - scouting_agent.dim_team
 
 materialization:
   type: table
@@ -76,7 +76,7 @@ load_dotenv(_ROOT / ".env")
 
 import wyscout  # noqa: E402
 
-from wyscout_bronze_scope import player_row_from_api, season_ids_for_monitoring  # noqa: E402
+from wyscout_dimension_scope import player_row_from_api, season_ids_for_monitoring  # noqa: E402
 
 _INT_COLS = (
     "height",
