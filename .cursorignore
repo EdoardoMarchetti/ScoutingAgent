@@ -1,0 +1,58 @@
+﻿# Keep Cursor context small: same spirit as .gitignore + heavy local stuff
+
+# Dependencies & build
+.venv/
+venv/
+ENV/
+env/
+node_modules/
+build/
+dist/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Secrets
+.env
+.env.*
+
+# Large / binary data (tune paths to your repo)
+data/raw/
+data/processed/
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.db
+*.sqlite
+*.sqlite3
+
+# Models & checkpoints
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.bin
+*.ckpt
+*.safetensors
+
+# Media (uncomment if huge folders hurt indexing)
+# *.mp4
+# *.mov
+# *.zip
+# *.7z
+
+# Git internals (redundant but explicit)
+.git/
+
+# Logs & caches
+*.log
+logs/
+.cache/
+.tox/
+.nox/
