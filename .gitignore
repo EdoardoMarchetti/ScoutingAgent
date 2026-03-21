@@ -89,3 +89,7 @@ models/*.pth
 models/*.onnx
 models/*.bin
 *.ckpt
+
+.bruin.yml
+
+.secrets/*
