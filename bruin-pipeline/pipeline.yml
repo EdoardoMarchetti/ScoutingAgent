@@ -13,3 +13,15 @@ variables:
     type: integer
     minimum: 0
     default: 0
+  match_from_date:
+    type: string
+    default: ""
+  match_to_date:
+    type: string
+    default: ""
+  fixture_details:
+    type: string
+    default: "matches"
+  fixture_fetch:
+    type: string
+    default: ""

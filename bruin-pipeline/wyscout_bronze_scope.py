@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 
@@ -190,3 +191,206 @@ def load_single_season_chain(wyscout_mod: Any, season_id: int) -> tuple[dict, di
         competition_row_from_api(comp),
         season_row_from_api(season, comp_wyid, explicit_season_id=int(season_id)),
     )
+
+
+# --- BigQuery (shared by bronze assets) ---
+
+
+def read_gcp_project_id(repo_root: Path) -> str:
+    text = (repo_root / ".bruin.yml").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("project_id:"):
+            return s.split(":", 1)[1].strip().strip("\"'")
+    raise RuntimeError("project_id not found in .bruin.yml")
+
+
+def bq_client(repo_root: Path):
+    from google.cloud import bigquery
+    from google.oauth2 import service_account
+
+    key_path = repo_root / ".secrets" / "bruin-wyscout-elt.json"
+    if not key_path.is_file():
+        raise RuntimeError(f"Service account file not found: {key_path}")
+    creds = service_account.Credentials.from_service_account_file(str(key_path))
+    project = read_gcp_project_id(repo_root)
+    return bigquery.Client(credentials=creds, project=project)
+
+
+# --- Fixtures / matches (season fixtures API) ---
+
+
+def fixture_window_dates() -> tuple[str | None, str | None]:
+    v = pipeline_vars()
+    fd = (v.get("match_from_date") or "").strip()
+    td = (v.get("match_to_date") or "").strip()
+    if not fd:
+        fd = os.environ.get("BRUIN_START_DATE") or None
+    if not td:
+        td = os.environ.get("BRUIN_END_DATE") or None
+    return (fd, td)
+
+
+def fixture_request_options() -> tuple[str, str | None]:
+    v = pipeline_vars()
+    details = (v.get("fixture_details") or "matches").strip() or "matches"
+    fetch = (v.get("fixture_fetch") or "").strip() or None
+    return details, fetch
+
+
+def matches_from_season_fixtures_payload(payload: Any) -> list[dict]:
+    """Flatten fixture response to list of raw items (may be {matchId, match:{...}} or flat match dicts)."""
+    if payload == -1 or payload is None:
+        return []
+    out: list[dict] = []
+    seen: set[int] = set()
+
+    def add(raw: dict) -> None:
+        if not isinstance(raw, dict):
+            return
+        mid = _fixture_match_id(raw)
+        if mid is None:
+            return
+        k = int(mid)
+        if k in seen:
+            return
+        seen.add(k)
+        out.append(raw)
+
+    if isinstance(payload, list):
+        for x in payload:
+            add(x if isinstance(x, dict) else {})
+        return out
+
+    if isinstance(payload, dict):
+        for key in ("matches", "fixtures", "data", "items"):
+            lst = payload.get(key)
+            if isinstance(lst, list):
+                for x in lst:
+                    if isinstance(x, dict):
+                        add(x)
+        for rnd in payload.get("rounds") or []:
+            if isinstance(rnd, dict):
+                for m in rnd.get("matches") or []:
+                    if isinstance(m, dict):
+                        add(m)
+    return out
+
+
+def _fixture_match_id(raw: dict) -> int | None:
+    inner = raw.get("match") if isinstance(raw.get("match"), dict) else None
+    src = inner if inner is not None else raw
+    return _maybe_int(src.get("wyId") or raw.get("matchId") or src.get("matchId"))
+
+
+def _maybe_int(v: Any) -> int | None:
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _home_away_from_teams_data(src: dict) -> tuple[int | None, int | None]:
+    td = src.get("teamsData")
+    if not isinstance(td, dict):
+        return None, None
+    home = away = None
+    for t in td.values():
+        if not isinstance(t, dict):
+            continue
+        side = str(t.get("side") or "").lower()
+        tid = _maybe_int(t.get("teamId"))
+        if tid is None:
+            continue
+        if side == "home":
+            home = tid
+        elif side == "away":
+            away = tid
+    return home, away
+
+
+def _home_away_team_ids(m: dict) -> tuple[int | None, int | None]:
+    """Legacy list shape: teams[] with side + team.wyId."""
+    teams = m.get("teams")
+    if isinstance(teams, list):
+        home = away = None
+        for t in teams:
+            if not isinstance(t, dict):
+                continue
+            side = str(t.get("side") or "").lower()
+            team_obj = t.get("team")
+            tid = None
+            if isinstance(team_obj, dict):
+                tid = _maybe_int(team_obj.get("wyId") or team_obj.get("id"))
+            if tid is None:
+                tid = _maybe_int(t.get("wyId") or t.get("teamId"))
+            if tid is None:
+                continue
+            if side == "home":
+                home = tid
+            elif side == "away":
+                away = tid
+        if home is not None or away is not None:
+            return home, away
+        if len(teams) >= 2:
+            t0, t1 = teams[0], teams[1]
+            h = _maybe_int(
+                (t0.get("team") or t0).get("wyId")
+                if isinstance(t0.get("team"), dict)
+                else t0.get("wyId")
+            )
+            a = _maybe_int(
+                (t1.get("team") or t1).get("wyId")
+                if isinstance(t1.get("team"), dict)
+                else t1.get("wyId")
+            )
+            return h, a
+    ht = m.get("homeTeam") if isinstance(m.get("homeTeam"), dict) else {}
+    at = m.get("awayTeam") if isinstance(m.get("awayTeam"), dict) else {}
+    return _maybe_int(ht.get("wyId")), _maybe_int(at.get("wyId"))
+
+
+def match_row_from_wyscout(m: dict, season_id: int) -> dict | None:
+    """
+    Supports Wyscout fixtures shape: {matchId, goals, match: {wyId, label, dateutc,
+    status, competitionId, seasonId, roundId, teamsData: {id: {teamId, side}}}}
+    and flatter match dicts.
+    """
+    inner = m.get("match") if isinstance(m.get("match"), dict) else None
+    src = inner if inner is not None else m
+
+    mid = _maybe_int(src.get("wyId") or m.get("matchId") or src.get("matchId"))
+    if mid is None:
+        return None
+
+    comp = src.get("competition") if isinstance(src.get("competition"), dict) else {}
+    cid = _maybe_int(comp.get("wyId") or comp.get("id")) or _maybe_int(
+        src.get("competitionId") or m.get("competitionId")
+    )
+
+    status = src.get("status")
+    if isinstance(status, dict):
+        status = status.get("type") or status.get("name")
+    status_str = str(status) if status is not None else None
+
+    rnd = src.get("roundId")
+    if rnd is None and isinstance(src.get("round"), dict):
+        rnd = src["round"].get("wyId")
+
+    home_id, away_id = _home_away_from_teams_data(src)
+    if home_id is None and away_id is None:
+        home_id, away_id = _home_away_team_ids(src)
+
+    return {
+        "match_id": int(mid),
+        "season_id": int(season_id),
+        "competition_id": cid,
+        "match_date_utc": _str_or_none(src.get("dateutc")),
+        "match_date_label": _str_or_none(src.get("label")),
+        "round_id": _maybe_int(rnd),
+        "status": status_str,
+        "home_team_id": home_id,
+        "away_team_id": away_id,
+    }

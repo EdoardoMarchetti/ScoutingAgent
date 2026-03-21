@@ -37,8 +37,6 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from google.cloud import bigquery
-from google.oauth2 import service_account
 
 _ROOT = Path(__file__).resolve().parents[3]
 _BRUIN_PL = Path(__file__).resolve().parents[2]
@@ -52,6 +50,7 @@ import wyscout  # noqa: E402
 
 from wyscout_bronze_scope import (  # noqa: E402
     active_from_season,
+    bq_client,
     get_season_chain_cached,
     optional_season_id,
 )
@@ -102,7 +101,7 @@ def materialize():
         df["active"] = df["active"].astype("boolean")
         return df
 
-    client = _bq_client()
+    client = bq_client(_ROOT)
     project = client.project
     query = f"""
         SELECT DISTINCT competition_id
