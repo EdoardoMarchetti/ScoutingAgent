@@ -394,3 +394,88 @@ def match_row_from_wyscout(m: dict, season_id: int) -> dict | None:
         "home_team_id": home_id,
         "away_team_id": away_id,
     }
+
+
+def season_ids_for_monitoring(repo_root: Path) -> list[int]:
+    """Same rule as fixtures: optional ``season_id`` var, else active rows in bronze_season."""
+    sid = optional_season_id()
+    if sid is not None:
+        return [sid]
+    client = bq_client(repo_root)
+    project = client.project
+    q = f"""
+        SELECT DISTINCT season_id
+        FROM `{project}.scouting_agent.bronze_season`
+        WHERE active = TRUE
+        ORDER BY season_id
+    """
+    rows = list(client.query(q).result())
+    if not rows:
+        raise RuntimeError(
+            "No active seasons in bronze_season; load seasons or set season_id."
+        )
+    return [int(r[0]) for r in rows]
+
+
+def teams_from_season_teams_payload(payload: Any) -> list[dict]:
+    if payload == -1 or payload is None:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    teams = payload.get("teams")
+    if not isinstance(teams, list):
+        return []
+    return [t for t in teams if isinstance(t, dict)]
+
+
+def team_row_from_api(t: dict) -> dict | None:
+    tid = _maybe_int(t.get("wyId"))
+    if tid is None:
+        return None
+    area = t.get("area") if isinstance(t.get("area"), dict) else {}
+    return {
+        "team_id": int(tid),
+        "name": t.get("name"),
+        "official_name": t.get("officialName"),
+        "type": t.get("type"),
+        "category": t.get("category"),
+        "gender": t.get("gender"),
+        "city": t.get("city"),
+        "gsm_id": _maybe_int(t.get("gsmId")),
+        "image_data_url": t.get("imageDataURL"),
+        "area_id": _maybe_int(area.get("id")),
+        "area_name": area.get("name"),
+        "area_alpha2_code": area.get("alpha2code"),
+        "area_alpha3_code": area.get("alpha3code"),
+    }
+
+
+def player_row_from_api(p: dict) -> dict | None:
+    pid = _maybe_int(p.get("wyId"))
+    if pid is None:
+        return None
+    ba = p.get("birthArea") if isinstance(p.get("birthArea"), dict) else {}
+    pa = p.get("passportArea") if isinstance(p.get("passportArea"), dict) else {}
+    role = p.get("role") if isinstance(p.get("role"), dict) else {}
+    return {
+        "player_id": int(pid),
+        "first_name": p.get("firstName"),
+        "middle_name": p.get("middleName"),
+        "last_name": p.get("lastName"),
+        "short_name": p.get("shortName"),
+        "birth_date": _str_or_none(p.get("birthDate")),
+        "foot": p.get("foot"),
+        "gender": p.get("gender"),
+        "height": _maybe_int(p.get("height")),
+        "weight": _maybe_int(p.get("weight")),
+        "status": p.get("status"),
+        "gsm_id": _maybe_int(p.get("gsmId")),
+        "image_data_url": p.get("imageDataURL"),
+        "current_team_id": _maybe_int(p.get("currentTeamId")),
+        "current_national_team_id": _maybe_int(p.get("currentNationalTeamId")),
+        "role_code2": role.get("code2"),
+        "role_code3": role.get("code3"),
+        "role_name": role.get("name"),
+        "birth_area_id": _maybe_int(ba.get("id")),
+        "passport_area_id": _maybe_int(pa.get("id")),
+    }

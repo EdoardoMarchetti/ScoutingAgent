@@ -278,36 +278,30 @@ def search_players_by_name(player_name, version='v3'):
 
 
 
-def get_players_list_by_season(seasonId, version='v3'):
+def get_players_list_by_season(seasonId, version='v3', limit=100):
     """
-    Function to download a list of players for a specific season using the Wyscout API.
-
-    Parameters:
-    - seasonId (int): The identifier of the season for which players are requested.
-    - user (str): The user identifier for Wyscout API credentials.
-    - version (str, optional): The API version to use (default is 'v3').
-
-    Returns:
-    - Returns the list of players for the specified season obtained from the Wyscout API.
+    Download all players for a season, following Wyscout pagination (meta.page_current / page_count).
     """
-    # Call the API to get the initial response for the first page of players
-    response_json = call_api(url=base_url[version].format(f"/seasons/{seasonId}/players?limit=100"))
-
-    # Loop over pages to retrieve all players
-    players = []
+    players: list = []
     page = 1
-    total_pages = response_json['meta']['page_count']
-
-    while response_json['meta']['page_current'] != response_json['meta']['page_count']:
-        print(f"Reading page {page}/{total_pages}")
-
-        # Call the API for the next page of players
-        response_json = call_api(url=base_url[version].format(f"/seasons/{seasonId}/players?limit=100&page={page}"),)
-
-        # Append the players from the current page to the list
-        players += response_json['players']
+    while True:
+        url = base_url[version].format(
+            f"/seasons/{seasonId}/players?limit={limit}&page={page}"
+        )
+        response_json = call_api(url=url)
+        if response_json == -1:
+            return -1 if not players else players
+        batch = response_json.get("players") or []
+        players.extend(batch)
+        meta = response_json.get("meta") or {}
+        page_current = meta.get("page_current", page)
+        page_count = meta.get("page_count", 1)
+        if page_count <= 0:
+            page_count = 1
+        print(f"Season {seasonId} players: page {page_current}/{page_count} ({len(batch)} rows)")
+        if page_current >= page_count or not batch:
+            break
         page += 1
-
     return players
 
 def get_players_list_by_team_season(teamId, seasonId, version='v3'):
@@ -520,7 +514,7 @@ def get_matches_list_by_season(seasonId, version='v3'):
     # Make an API call to get the matches list
     return call_api(url=url)
 
-    
+
 def get_season_fixtures(
     seasonId,
     version="v3",

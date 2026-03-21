@@ -55,37 +55,16 @@ load_dotenv(_ROOT / ".env")
 import wyscout  # noqa: E402
 
 from wyscout_bronze_scope import (  # noqa: E402
-    bq_client,
     fixture_request_options,
     fixture_window_dates,
     match_row_from_wyscout,
     matches_from_season_fixtures_payload,
-    optional_season_id,
+    season_ids_for_monitoring,
 )
 
 
-def _season_ids_for_fixtures(client, project: str) -> list[int]:
-    sid = optional_season_id()
-    if sid is not None:
-        return [sid]
-    q = f"""
-        SELECT DISTINCT season_id
-        FROM `{project}.scouting_agent.bronze_season`
-        WHERE active = TRUE
-        ORDER BY season_id
-    """
-    rows = list(client.query(q).result())
-    if not rows:
-        raise RuntimeError(
-            "No active seasons in bronze_season. Load seasons or set season_id / activate rows."
-        )
-    return [int(r[0]) for r in rows]
-
-
 def materialize():
-    client = bq_client(_ROOT)
-    project = client.project
-    season_ids = _season_ids_for_fixtures(client, project)
+    season_ids = season_ids_for_monitoring(_ROOT)
     from_d, to_d = fixture_window_dates()
     details, fetch = fixture_request_options()
 
