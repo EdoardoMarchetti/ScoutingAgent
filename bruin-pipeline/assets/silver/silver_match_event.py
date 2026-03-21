@@ -6,6 +6,7 @@ connection: gcp
 
 depends:
   - scouting_agent.bronze_match_events
+  - scouting_agent.dim_match
 
 materialization:
   type: table
@@ -53,6 +54,8 @@ columns:
     type: integer
   - name: possession_id
     type: integer
+  - name: possession_team_id
+    type: integer
   - name: pass_payload
     type: string
   - name: shot_payload
@@ -90,6 +93,7 @@ from wyscout_dimension_scope import (  # noqa: E402
     download_json_from_gcs_uri,
     events_list_from_wyscout_match_events_api,
     gcs_storage_client,
+    match_date_window_predicate_sql,
     silver_match_event_row,
     unpack_bronze_match_events_document,
 )
@@ -106,18 +110,43 @@ _INT_COLS = (
     "opponent_team_id",
     "player_id",
     "possession_id",
+    "possession_team_id",
 )
 
 
 def materialize():
     bq = bq_client(_ROOT)
     project = bq.project
-    q = f"""
+    window_sql = match_date_window_predicate_sql("m.match_date_utc")
+    if window_sql:
+        purge_q = f"""
+        DELETE FROM `{project}.scouting_agent.silver_match_event` AS s
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM `{project}.scouting_agent.dim_match` AS m
+          WHERE m.match_id = s.match_id
+            AND m.season_id = s.season_id
+            AND m.competition_id IS NOT NULL
+            {window_sql}
+        )
+        """
+        bq.query(purge_q).result()
+        q = f"""
+        SELECT b.match_id, b.season_id, b.competition_id, b.gcs_uri
+        FROM `{project}.scouting_agent.bronze_match_events` b
+        INNER JOIN `{project}.scouting_agent.dim_match` m
+          ON b.match_id = m.match_id AND b.season_id = m.season_id
+        WHERE b.ok IS TRUE AND b.gcs_uri IS NOT NULL
+        {window_sql}
+        ORDER BY b.match_id
+        """
+    else:
+        q = f"""
         SELECT match_id, season_id, competition_id, gcs_uri
         FROM `{project}.scouting_agent.bronze_match_events`
         WHERE ok IS TRUE AND gcs_uri IS NOT NULL
         ORDER BY match_id
-    """
+        """
     job = bq.query(q)
     storage = gcs_storage_client(_ROOT)
 
@@ -165,6 +194,7 @@ def materialize():
                 "opponent_team_id",
                 "player_id",
                 "possession_id",
+                "possession_team_id",
                 "pass_payload",
                 "shot_payload",
                 "ground_duel_payload",

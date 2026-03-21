@@ -317,6 +317,13 @@ Examples of a won defensive duel:
 
 If a defending player lets the attacking player progress with the ball, it's considered a lost defensive duel (and a won **Offensive duel** for the player with the ball, see **Offensive duel** for more details).
 
+#### `gold_match_duel_event` (pipeline)
+
+Wyscout can tag duels with secondary types such as **`sliding_tackle`** and **`dribbled_past_attempt`** (see event type combinations in `event_types_documentation.md`). In the gold table:
+
+- **`is_sliding_tackle`**: `true` when the secondary list contains `sliding_tackle`.
+- **`is_dribbled_past_attempt`**: `true` when either the secondary list contains **`dribbled_past_attempt`**, or **`groundDuel.duelType` is `defensive_duel` and `takeOn` is `true`**. In the latter case, treat the row as the defender’s side of a duel where the ball carrier attempted a **take-on** (strict dribble past the defender); Wyscout does not always emit the `dribbled_past_attempt` secondary together with that payload, so the defensive + take-on rule aligns the flag with the same idea.
+
 ## Aerial Duel
 
 When event is aerial duel.

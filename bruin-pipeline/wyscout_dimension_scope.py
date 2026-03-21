@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -259,27 +260,6 @@ def match_events_gcs_blob_path(
     return rel
 
 
-def fetch_match_keys_for_events(
-    client: Any, project: str, season_ids: list[int]
-) -> list[tuple[int, int, int]]:
-    """Distinct (competition_id, season_id, match_id) from dim_match for given seasons."""
-    if not season_ids:
-        return []
-    sid_list = ",".join(str(int(s)) for s in season_ids)
-    q = f"""
-        SELECT DISTINCT competition_id, season_id, match_id
-        FROM `{project}.scouting_agent.dim_match`
-        WHERE competition_id IS NOT NULL
-          AND season_id IN ({sid_list})
-        ORDER BY season_id, match_id
-    """
-    out: list[tuple[int, int, int]] = []
-    for row in client.query(q).result():
-        cid, sid, mid = int(row[0]), int(row[1]), int(row[2])
-        out.append((cid, sid, mid))
-    return out
-
-
 def upload_json_bytes_to_gcs(
     storage_client: Any,
     bucket_name: str,
@@ -305,6 +285,64 @@ def fixture_window_dates() -> tuple[str | None, str | None]:
     if not td:
         td = os.environ.get("BRUIN_END_DATE") or None
     return (fd, td)
+
+
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def bq_match_date_from_utc_string(column_expr: str) -> str:
+    """BigQuery: STRING ``match_date_utc`` → DATE (UTC calendar day, best-effort parse)."""
+    c = column_expr
+    return (
+        "DATE(COALESCE("
+        f"SAFE.PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', TRIM({c})), "
+        f"SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*S%Ez', TRIM({c})), "
+        f"TIMESTAMP(SAFE.PARSE_DATE('%Y-%m-%d', SUBSTR(TRIM({c}), 1, 10)))"
+        "))"
+    )
+
+
+def match_date_window_predicate_sql(match_date_column: str) -> str:
+    """
+    When ``match_from_date`` and ``match_to_date`` (or ``BRUIN_START_DATE`` /
+    ``BRUIN_END_DATE``) are both ``YYYY-MM-DD``, return ``AND ...`` so only rows
+    in that inclusive window remain. Otherwise return ``""`` (no date filter).
+    """
+    fd, td = fixture_window_dates()
+    if not fd or not td or not _ISO_DATE.match(fd) or not _ISO_DATE.match(td):
+        return ""
+    dexpr = bq_match_date_from_utc_string(match_date_column)
+    return (
+        f" AND {match_date_column} IS NOT NULL AND TRIM({match_date_column}) != ''"
+        f" AND {dexpr} BETWEEN DATE('{fd}') AND DATE('{td}')"
+    )
+
+
+def fetch_match_keys_for_events(
+    client: Any, project: str, season_ids: list[int]
+) -> list[tuple[int, int, int]]:
+    """
+    Distinct ``(competition_id, season_id, match_id)`` from ``dim_match`` for the
+    given seasons. If pipeline vars set both match window dates, restricts to
+    ``match_date_utc`` in that inclusive range (same semantics as ``dim_match`` ingest).
+    """
+    if not season_ids:
+        return []
+    sid_list = ",".join(str(int(s)) for s in season_ids)
+    window_sql = match_date_window_predicate_sql("match_date_utc")
+    q = f"""
+        SELECT DISTINCT competition_id, season_id, match_id
+        FROM `{project}.scouting_agent.dim_match`
+        WHERE competition_id IS NOT NULL
+          AND season_id IN ({sid_list})
+          {window_sql}
+        ORDER BY season_id, match_id
+    """
+    out: list[tuple[int, int, int]] = []
+    for row in client.query(q).result():
+        cid, sid, mid = int(row[0]), int(row[1]), int(row[2])
+        out.append((cid, sid, mid))
+    return out
 
 
 def fixture_request_options() -> tuple[str, str | None]:
@@ -627,7 +665,8 @@ def silver_match_event_row(
     """
     Flat silver row: time, type, location, FK-style ids (team / opponent / player) for dim join,
     JSON payloads per subtree. No denormalized names or formations (use dim_team, dim_player).
-    Possession body omitted; only ``possession_id`` for a future possession table.
+    ``possession_team_id``: Wyscout ``possession.team.id`` when the possession object is present
+    (needed for aerial duel offensive/defensive vs team in possession).
     """
     eid = _maybe_int(e.get("id"))
     if eid is None:
@@ -648,6 +687,8 @@ def silver_match_event_row(
 
     poss = e.get("possession") if isinstance(e.get("possession"), dict) else {}
     possession_id = _maybe_int(poss.get("id")) if poss else None
+    poss_team = poss.get("team") if isinstance(poss.get("team"), dict) else {}
+    possession_team_id = _maybe_int(poss_team.get("id")) if poss_team else None
 
     return {
         "match_id": int(match_id),
@@ -668,6 +709,7 @@ def silver_match_event_row(
         "opponent_team_id": _maybe_int(opp.get("id")),
         "player_id": _maybe_int(pl.get("id")),
         "possession_id": possession_id,
+        "possession_team_id": possession_team_id,
         "pass_payload": _optional_json_subtree(e.get("pass")),
         "shot_payload": _optional_json_subtree(e.get("shot")),
         "ground_duel_payload": _optional_json_subtree(e.get("groundDuel")),
