@@ -5,3 +5,11 @@ catchup: false
 
 default_connections:
   google_cloud_platform: "gcp" #it must be the same name as in the .bruin.yml file
+
+# season_id: 0 = load all areas / competitions / seasons (default).
+# season_id: <wyId> = only that season + its competition + area (minimal API calls).
+variables:
+  season_id:
+    type: integer
+    minimum: 0
+    default: 0

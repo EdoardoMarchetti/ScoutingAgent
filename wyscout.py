@@ -520,22 +520,31 @@ def get_matches_list_by_season(seasonId, version='v3'):
     # Make an API call to get the matches list
     return call_api(url=url)
 
-def get_season_fixtures(seasonId, version='v3'):
+    
+def get_season_fixtures(
+    seasonId,
+    version="v3",
+    from_date=None,
+    to_date=None,
+    fetch=None,
+    details="matches",
+):
     """
-    Function to retrieve fixtures for a specific season using the Wyscout API.
-
-    Parameters:
-    - seasonId (int): The identifier of the season for which fixtures are requested.
-    - version (str, optional): The API version to use (default is 'v3').
-
-    Returns:
-    - Returns the list of fixtures for the specified season obtained from the Wyscout API.
+    GET /seasons/{seasonId}/fixtures
+    Query params: fromDate, toDate (YYYY-MM-DD), fetch (e.g. season),
+    details (comma-separated: matches, players, teams).
     """
-    # Construct the URL for retrieving fixtures for the specified season
     url = base_url[version].format(f"/seasons/{seasonId}/fixtures")
-
-    # Make an API call to get the fixtures list with match details
-    return call_api(url=url, params={'details': 'matches'})
+    params = {}
+    if details:
+        params["details"] = details
+    if fetch:
+        params["fetch"] = fetch
+    if from_date:
+        params["fromDate"] = from_date
+    if to_date:
+        params["toDate"] = to_date
+    return call_api(url=url, params=params if params else None)
 
 def get_competition_fixtures(compId, version='v3'):
     """

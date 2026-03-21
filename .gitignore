@@ -93,3 +93,5 @@ models/*.bin
 .bruin.yml
 
 .secrets/*
+logs/runs
+logs/*.log

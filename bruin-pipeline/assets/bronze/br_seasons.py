@@ -1,0 +1,146 @@
+"""@bruin
+name: scouting_agent.bronze_season
+type: python
+image: python:3.12
+connection: gcp
+
+depends:
+  - scouting_agent.bronze_competition
+
+materialization:
+  type: table
+  strategy: merge
+
+parameters:
+  enforce_schema: true
+
+columns:
+  - name: season_id
+    type: integer
+    primary_key: true
+  - name: competition_id
+    type: integer
+  - name: name
+    type: string
+  - name: start_date
+    type: string
+  - name: end_date
+    type: string
+  - name: active
+    type: boolean
+@bruin"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+from dotenv import load_dotenv
+from google.cloud import bigquery
+from google.oauth2 import service_account
+
+_ROOT = Path(__file__).resolve().parents[3]
+_BRUIN_PL = Path(__file__).resolve().parents[2]
+for p in (_ROOT, _BRUIN_PL):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+load_dotenv(_ROOT / ".env")
+
+import wyscout  # noqa: E402
+
+from wyscout_bronze_scope import (  # noqa: E402
+    active_from_season,
+    get_season_chain_cached,
+    optional_season_id,
+)
+
+
+def _as_item_list(payload: object, keys: tuple[str, ...]) -> list:
+    if payload == -1 or payload is None:
+        return []
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for k in keys:
+            v = payload.get(k)
+            if isinstance(v, list):
+                return v
+    return []
+
+
+def _read_project_id() -> str:
+    text = (_ROOT / ".bruin.yml").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("project_id:"):
+            return s.split(":", 1)[1].strip().strip("\"'")
+    raise RuntimeError("project_id not found in .bruin.yml")
+
+
+def _bq_client() -> bigquery.Client:
+    key_path = _ROOT / ".secrets" / "bruin-wyscout-elt.json"
+    if not key_path.is_file():
+        raise RuntimeError(f"Service account file not found: {key_path}")
+    creds = service_account.Credentials.from_service_account_file(str(key_path))
+    project = _read_project_id()
+    return bigquery.Client(credentials=creds, project=project)
+
+
+def _as_str(v: object) -> str | None:
+    if v is None:
+        return None
+    return str(v)
+
+
+def materialize():
+    sid = optional_season_id()
+    if sid is not None:
+        _, _, season_row = get_season_chain_cached(wyscout, sid)
+        df = pd.DataFrame([season_row])
+        df["active"] = df["active"].astype("boolean")
+        return df
+
+    client = _bq_client()
+    project = client.project
+    query = f"""
+        SELECT DISTINCT competition_id
+        FROM `{project}.scouting_agent.bronze_competition`
+        ORDER BY competition_id
+    """
+    job = client.query(query)
+    comp_ids = [int(r[0]) for r in job.result()]
+    if not comp_ids:
+        raise RuntimeError("bronze_competition is empty; run bronze_competition first.")
+
+    rows: list[dict] = []
+    for comp_id in comp_ids:
+        payload = wyscout.get_seasons_list(comp_id, version="v3")
+        if payload == -1:
+            raise RuntimeError(f"get_seasons_list failed for competition_id={comp_id}")
+        seasons = _as_item_list(payload, ("seasons", "items", "data"))
+        for s in seasons:
+            if not isinstance(s, dict):
+                continue
+            sw = s.get("wyId")
+            if sw is None:
+                continue
+            rows.append(
+                {
+                    "season_id": int(sw),
+                    "competition_id": comp_id,
+                    "name": s.get("name"),
+                    "start_date": _as_str(s.get("startDate") or s.get("start_date")),
+                    "end_date": _as_str(s.get("endDate") or s.get("end_date")),
+                    "active": active_from_season(s),
+                }
+            )
+
+    if not rows:
+        raise RuntimeError("No seasons returned from Wyscout for any competition.")
+
+    df = pd.DataFrame(rows)
+    df = df.drop_duplicates(subset=["season_id"], keep="first")
+    df["active"] = df["active"].astype("boolean")
+    return df
