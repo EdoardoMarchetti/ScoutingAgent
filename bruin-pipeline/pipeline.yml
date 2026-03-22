@@ -25,3 +25,13 @@ variables:
   fixture_fetch:
     type: string
     default: ""
+
+# silver_match_possession: merge on (match_id, possession_id); qualifiers in gold_match_possession (SQL).
+# gold_match_possession: first run --full-refresh (delete+insert needs target table to exist).
+# Gold match-event tables (delete+insert on incremental_key match_id):
+# duel, pass, shot, clearance, recovery_interception, infraction, touch_in_box, carry,
+# shot_against, goalkeeper_exit, set_piece, possession.
+# Normal run joins silver to dim_match scope
+# (season_id if non-zero else active dim_season; optional match_from_date + match_to_date).
+# bruin run --full-refresh on those assets = full rebuild from all silver (no scope join).
+# After narrowing the date window + silver purge, run --full-refresh on gold once if you need to drop gold rows for matches no longer in silver.

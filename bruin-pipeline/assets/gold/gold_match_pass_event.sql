@@ -6,158 +6,189 @@ connection: gcp
 
 depends:
   - scouting_agent.silver_match_event
+  - scouting_agent.dim_match
+  - scouting_agent.dim_season
 
 materialization:
   type: table
-  strategy: create+replace
+  strategy: delete+insert
+  incremental_key: match_id
 
 columns:
   - name: match_id
-    type: integer
+    type: int64
     primary_key: true
   - name: event_id
-    type: integer
+    type: int64
     primary_key: true
   - name: season_id
-    type: integer
+    type: int64
   - name: competition_id
-    type: integer
+    type: int64
   - name: match_period
     type: string
   - name: minute
-    type: integer
+    type: int64
   - name: second
-    type: integer
+    type: int64
   - name: match_timestamp
     type: string
   - name: video_timestamp
     type: string
   - name: related_event_id
-    type: integer
+    type: int64
   - name: type_primary
     type: string
   - name: type_secondary_json
     type: string
   - name: location_x
-    type: integer
+    type: int64
   - name: location_y
-    type: integer
+    type: int64
   - name: team_id
-    type: integer
+    type: int64
   - name: opponent_team_id
-    type: integer
+    type: int64
   - name: player_id
-    type: integer
+    type: int64
   - name: possession_id
-    type: integer
+    type: int64
   - name: source_gcs_uri
     type: string
   - name: pass_signal_primary
-    type: boolean
+    type: bool
   - name: pass_signal_secondary
-    type: boolean
+    type: bool
   - name: pass_signal_payload
-    type: boolean
+    type: bool
   - name: pass_signal_payload_only
-    type: boolean
+    type: bool
   - name: pass_signal_type
     type: string
   - name: is_free_kick
-    type: boolean
+    type: bool
   - name: is_corner
-    type: boolean
+    type: bool
   - name: is_throw_in
-    type: boolean
+    type: bool
   - name: is_goal_kick
-    type: boolean
+    type: bool
   - name: is_free_kick_cross
-    type: boolean
+    type: bool
   - name: is_assist
-    type: boolean
+    type: bool
   - name: is_second_assist
-    type: boolean
+    type: bool
   - name: is_third_assist
-    type: boolean
+    type: bool
   - name: is_key_pass
-    type: boolean
+    type: bool
   - name: is_shot_assist
-    type: boolean
+    type: bool
   - name: is_progressive_pass
-    type: boolean
+    type: bool
   - name: is_through_pass
-    type: boolean
+    type: bool
   - name: is_pass_to_final_third
-    type: boolean
+    type: bool
   - name: is_pass_to_penalty_area
-    type: boolean
+    type: bool
   - name: is_forward_pass
-    type: boolean
+    type: bool
   - name: is_deep_completion
-    type: boolean
+    type: bool
   - name: is_deep_completed_cross
-    type: boolean
+    type: bool
   - name: is_cross
-    type: boolean
+    type: bool
   - name: is_cross_blocked
-    type: boolean
+    type: bool
   - name: is_long_pass
-    type: boolean
+    type: bool
   - name: is_short_or_medium_pass
-    type: boolean
+    type: bool
   - name: is_lateral_pass
-    type: boolean
+    type: bool
   - name: is_back_pass
-    type: boolean
+    type: bool
   - name: is_head_pass
-    type: boolean
+    type: bool
   - name: is_hand_pass
-    type: boolean
+    type: bool
   - name: is_smart_pass
-    type: boolean
+    type: bool
   - name: is_under_pressure
-    type: boolean
+    type: bool
   - name: is_linkup_play
-    type: boolean
+    type: bool
   - name: pass_accurate
-    type: boolean
+    type: bool
   - name: pass_length_m
-    type: float
+    type: float64
   - name: pass_angle_deg
-    type: float
+    type: float64
   - name: pass_height
     type: string
   - name: pass_end_x
-    type: float
+    type: float64
   - name: pass_end_y
-    type: float
+    type: float64
   - name: recipient_player_id
-    type: integer
+    type: int64
 
 @bruin */
 
 WITH silver AS (
   SELECT
-    match_id,
-    event_id,
-    season_id,
-    competition_id,
-    match_period,
-    minute,
-    second,
-    match_timestamp,
-    video_timestamp,
-    related_event_id,
-    type_primary,
-    type_secondary_json,
-    location_x,
-    location_y,
-    team_id,
-    opponent_team_id,
-    player_id,
-    possession_id,
-    pass_payload,
-    source_gcs_uri
-  FROM `scouting_agent.silver_match_event`
+    se.match_id,
+    se.event_id,
+    se.season_id,
+    se.competition_id,
+    se.match_period,
+    se.minute,
+    se.second,
+    se.match_timestamp,
+    se.video_timestamp,
+    se.related_event_id,
+    se.type_primary,
+    se.type_secondary_json,
+    se.location_x,
+    se.location_y,
+    se.team_id,
+    se.opponent_team_id,
+    se.player_id,
+    se.possession_id,
+    se.pass_payload,
+    se.source_gcs_uri
+  FROM `scouting_agent.silver_match_event` AS se
+  {% if not full_refresh %}
+  INNER JOIN (
+    SELECT DISTINCT m.match_id
+    FROM `scouting_agent.dim_match` AS m
+    WHERE m.competition_id IS NOT NULL
+    {% if var.season_id|default(0)|int %}
+    AND m.season_id = {{ var.season_id|int }}
+    {% else %}
+    AND m.season_id IN (
+      SELECT season_id
+      FROM `scouting_agent.dim_season`
+      WHERE active IS TRUE
+    )
+    {% endif %}
+    {% if var.match_from_date and var.match_to_date %}
+    AND m.match_date_utc IS NOT NULL
+    AND TRIM(m.match_date_utc) != ''
+    AND DATE(
+      COALESCE(
+        SAFE.PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', TRIM(m.match_date_utc)),
+        SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*S%Ez', TRIM(m.match_date_utc)),
+        TIMESTAMP(SAFE.PARSE_DATE('%Y-%m-%d', SUBSTR(TRIM(m.match_date_utc), 1, 10)))
+      )
+    ) BETWEEN DATE('{{ var.match_from_date }}') AND DATE('{{ var.match_to_date }}')
+    {% endif %}
+  ) AS _gold_scope
+    ON se.match_id = _gold_scope.match_id
+  {% endif %}
 ),
 parsed AS (
   SELECT

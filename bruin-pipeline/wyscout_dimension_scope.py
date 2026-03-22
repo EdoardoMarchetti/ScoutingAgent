@@ -718,3 +718,43 @@ def silver_match_event_row(
         "carry_payload": _optional_json_subtree(e.get("carry")),
         "source_gcs_uri": source_gcs_uri,
     }
+
+
+def silver_match_possession_row(
+    *,
+    match_id: int,
+    season_id: int | None,
+    competition_id: int | None,
+    source_gcs_uri: str,
+    e: dict,
+) -> dict | None:
+    """
+    One possession snapshot from a single event (Wyscout ``possession`` on the event).
+    ``types_json`` and ``attack_payload`` are stored; qualifiers from ``types`` and fields
+    from ``attack`` are computed in BigQuery (``gold_match_possession``).
+    Omits team name / formation; use ``dim_team`` via ``team_id``.
+    """
+    poss = e.get("possession") if isinstance(e.get("possession"), dict) else None
+    if not poss:
+        return None
+    pid = _maybe_int(poss.get("id"))
+    if pid is None:
+        return None
+    team = poss.get("team") if isinstance(poss.get("team"), dict) else {}
+    types_raw = poss.get("types")
+    if isinstance(types_raw, list):
+        types_json = json.dumps(types_raw, ensure_ascii=False)
+    else:
+        types_json = "[]"
+    return {
+        "match_id": int(match_id),
+        "possession_id": int(pid),
+        "season_id": season_id,
+        "competition_id": competition_id,
+        "team_id": _maybe_int(team.get("id")),
+        "events_number": _maybe_int(poss.get("eventsNumber")),
+        "event_index": _maybe_int(poss.get("eventIndex")),
+        "types_json": types_json,
+        "attack_payload": _optional_json_subtree(poss.get("attack")),
+        "source_gcs_uri": source_gcs_uri,
+    }
