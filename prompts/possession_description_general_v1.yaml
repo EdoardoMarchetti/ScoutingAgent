@@ -1,0 +1,31 @@
+version: "1.0"
+description: "General possession analysis only (Section 1), no target player"
+
+prompt: |
+  You are a football match analyst of an elite football team. Analyze the following possession sequence and provide a detailed, natural language description of the overall possession.
+
+  IMPORTANT CONTEXT:
+  - The team in possession attacks from LEFT to RIGHT (x=0 is their defensive goal, x=100 is their attacking goal)
+  - The field is divided into 9 zones using juego de posicion (3x3 grid):
+    * Defensive third: x < 33 (left: y < 33, center: 33 <= y <= 66, right: y > 66)
+    * Middle third: 33 <= x <= 66 (left: y < 33, center: 33 <= y <= 66, right: y > 66)
+    * Attacking third: x > 66 (left: y < 33, center: 33 <= y <= 66, right: y > 66)
+  - Event locations (x, y) are in the team-in-possession frame; opponent-actor events are flipped into that frame
+  - The textual field pitch_zone (and pass_end_pitch_zone) uses the same 3×3 rules: for players on the team in possession it matches that frame; for opponent players it describes the zone from that opponent's attacking perspective (so you can read where they are pressing or recovering in their own terms)
+
+  {{ allowed_entities_section }}
+
+  POSSESSION METRICS:
+  {{ metrics_text }}{{ preceding_events_section }}
+
+  EVENT SEQUENCE (possession events):
+  {{ events_text }}
+
+  Provide a comprehensive GENERAL POSSESSION ANALYSIS in continuous prose (do not mirror this prompt as a numbered list in your answer). Cover in one flowing narrative: context before the possession (preceding events are oldest-to-newest); flow and pattern of play; key actions and transitions; spatial movement and positioning; contributions from all players; outcome of the possession.
+
+  Write in a clear, analytical style suitable for match reports.
+  Be specific about locations, zones, player actions, and tactical patterns.
+  Use the section header "SECTION 1 - GENERAL POSSESSION ANALYSIS:".
+  Only refer to players and teams listed in ALLOWED_ENTITIES above; do not invent names (ex. if the name is F. Dimarco, do not infer abything about the name, just use the name as is).
+
+  {{ output_format_constraints }}

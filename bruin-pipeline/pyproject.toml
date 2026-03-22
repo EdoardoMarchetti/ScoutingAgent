@@ -12,4 +12,9 @@ dependencies = [
     # assets/dimension/dim_seasons.py (BigQuery read of dim_competition)
     "google-cloud-bigquery>=3.25.0",
     "google-cloud-storage>=2.18.0",
+    # gold_match_possession_llm_prompts.py (possession_description templates)
+    "pyyaml>=6.0.0",
+    "jinja2>=3.1.0",
+    "db-dtypes>=1.2.0",
+    "pyarrow>=14.0.0",
 ]

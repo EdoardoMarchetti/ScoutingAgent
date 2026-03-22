@@ -720,6 +720,99 @@ def silver_match_event_row(
     }
 
 
+def analyzer_event_from_silver_match_event_row(
+    r: dict[str, Any],
+    *,
+    player_display_name: str | None = None,
+) -> dict[str, Any] | None:
+    """
+    Rebuild a Wyscout-shaped event dict from a ``silver_match_event`` row for
+    :func:`possession_analyzer.extract_possessions` / :func:`possession_analyzer.analyze_possession`.
+    """
+    eid = _maybe_int(r.get("event_id"))
+    if eid is None:
+        return None
+
+    sec: list[Any] | None = None
+    sec_raw = r.get("type_secondary_json")
+    if isinstance(sec_raw, str) and sec_raw.strip():
+        try:
+            parsed = json.loads(sec_raw)
+            if isinstance(parsed, list):
+                sec = parsed
+        except json.JSONDecodeError:
+            sec = None
+
+    typ: dict[str, Any] = {}
+    primary = r.get("type_primary")
+    if primary:
+        typ["primary"] = primary
+    if sec is not None:
+        typ["secondary"] = sec
+
+    possession: dict[str, Any] = {}
+    pid = _maybe_int(r.get("possession_id"))
+    if pid is not None:
+        possession["id"] = int(pid)
+    ptid = _maybe_int(r.get("possession_team_id"))
+    if ptid is not None:
+        possession["team"] = {"id": int(ptid)}
+
+    team: dict[str, Any] = {}
+    tid = _maybe_int(r.get("team_id"))
+    if tid is not None:
+        team["id"] = int(tid)
+
+    player: dict[str, Any] = {}
+    plid = _maybe_int(r.get("player_id"))
+    if plid is not None:
+        player["id"] = int(plid)
+        if player_display_name:
+            player["shortName"] = player_display_name
+            player["name"] = player_display_name
+
+    loc: dict[str, Any] | None = None
+    lx = _maybe_int_coord(r.get("location_x"))
+    ly = _maybe_int_coord(r.get("location_y"))
+    if lx is not None and ly is not None:
+        loc = {"x": lx, "y": ly}
+
+    ts = _str_or_none(r.get("match_timestamp")) or "00:00:00.000"
+    out: dict[str, Any] = {
+        "id": int(eid),
+        "minute": r.get("minute"),
+        "second": r.get("second"),
+        "matchTimestamp": ts,
+        "matchPeriod": r.get("match_period"),
+        "type": typ,
+        "team": team,
+        "player": player,
+        "possession": possession,
+    }
+    if loc is not None:
+        out["location"] = loc
+
+    for col, api_key in (
+        ("pass_payload", "pass"),
+        ("shot_payload", "shot"),
+        ("ground_duel_payload", "groundDuel"),
+        ("aerial_duel_payload", "aerialDuel"),
+        ("infraction_payload", "infraction"),
+        ("carry_payload", "carry"),
+    ):
+        raw = r.get(col)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and obj:
+            out[api_key] = obj
+
+    return out
+
+
 def silver_match_possession_row(
     *,
     match_id: int,
@@ -730,6 +823,7 @@ def silver_match_possession_row(
 ) -> dict | None:
     """
     One possession snapshot from a single event (Wyscout ``possession`` on the event).
+    ``duration`` is Wyscout ``possession.duration`` (seconds) when parseable.
     ``types_json`` and ``attack_payload`` are stored; qualifiers from ``types`` and fields
     from ``attack`` are computed in BigQuery (``gold_match_possession``).
     Omits team name / formation; use ``dim_team`` via ``team_id``.
@@ -746,6 +840,13 @@ def silver_match_possession_row(
         types_json = json.dumps(types_raw, ensure_ascii=False)
     else:
         types_json = "[]"
+    duration_sec: float | None = None
+    raw_dur = poss.get("duration")
+    if raw_dur is not None:
+        try:
+            duration_sec = float(raw_dur)
+        except (TypeError, ValueError):
+            pass
     return {
         "match_id": int(match_id),
         "possession_id": int(pid),
@@ -754,6 +855,7 @@ def silver_match_possession_row(
         "team_id": _maybe_int(team.get("id")),
         "events_number": _maybe_int(poss.get("eventsNumber")),
         "event_index": _maybe_int(poss.get("eventIndex")),
+        "duration": duration_sec,
         "types_json": types_json,
         "attack_payload": _optional_json_subtree(poss.get("attack")),
         "source_gcs_uri": source_gcs_uri,

@@ -1,0 +1,37 @@
+version: "1.0"
+description: "Target player impact analysis only (Section 2), given general analysis"
+
+prompt: |
+  You are a football scout of an elite football team. You have the same structured match data as for the general possession analysis, plus the Section 1 summary and a target player. Write only the TARGET PLAYER IMPACT ANALYSIS for that player.
+
+  IMPORTANT CONTEXT:
+  - The team in possession attacks from LEFT to RIGHT (x=0 is their defensive goal, x=100 is their attacking goal)
+  - The field is divided into 9 zones using juego de posicion (3x3 grid):
+    * Defensive third: x < 33 (left: y < 33, center: 33 <= y <= 66, right: y > 66)
+    * Middle third: 33 <= x <= 66 (left: y < 33, center: 33 <= y <= 66, right: y > 66)
+    * Attacking third: x > 66 (left: y < 33, center: 33 <= y <= 66, right: y > 66)
+  - Event locations (x, y) are in the team-in-possession frame; opponent-actor events are flipped into that frame
+  - The textual field pitch_zone (and pass_end_pitch_zone) uses the same 3×3 rules: for players on the team in possession it matches that frame; for opponent players it describes the zone from that opponent's attacking perspective (so you can read where they are pressing or recovering in their own terms)
+
+  {{ allowed_entities_section }}
+
+  POSSESSION METRICS:
+  {{ metrics_text }}{{ preceding_events_section }}
+
+  EVENT SEQUENCE (possession events):
+  {{ events_text }}
+
+  GENERAL POSSESSION ANALYSIS (Section 1 — context for your response; do not repeat it verbatim):
+  {{ general_description }}
+
+  TARGET PLAYER (Section 2 must focus only on this player):
+  Target player: {{ target_player_name }}
+
+  Events involving this player only (subset of preceding + possession above; each object has phase "preceding" or "possession"):
+  {{ target_player_events_text }}
+
+  Write ONLY the "SECTION 2 - TARGET PLAYER IMPACT ANALYSIS:" section. In continuous prose (not as a list), cover this player's role and impact: actions and decisions; positioning and movement; contribution to team play; effectiveness; influence on the outcome; tactical significance. Ground your analysis in the full event sequence and metrics when relevant, not only the filtered JSON.
+
+  Write in a clear, analytical style. Be specific about locations and actions. Start with the section header "SECTION 2 - TARGET PLAYER IMPACT ANALYSIS:". Only refer to players and teams listed in ALLOWED_ENTITIES above; do not invent names (ex. if the name is F. Dimarco, do not infer abything about the name, just use the name as is).
+
+  {{ output_format_constraints }}

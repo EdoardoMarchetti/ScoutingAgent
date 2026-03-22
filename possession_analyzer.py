@@ -64,6 +64,31 @@ def is_set_piece_event(event: Dict[str, Any]) -> bool:
     return type_primary in set_piece_types
 
 
+def _preceding_events_before_possession(
+    first_event: Dict[str, Any],
+    all_match_events: List[Dict[str, Any]],
+    context_events: int,
+) -> List[Dict[str, Any]]:
+    """Up to ``context_events`` events before the first possession event (most recent first)."""
+    sorted_events = sorted(
+        all_match_events,
+        key=lambda e: parse_timestamp(e.get('matchTimestamp', '00:00:00.000')),
+    )
+    first_ts = parse_timestamp(first_event.get('matchTimestamp', '00:00:00.000'))
+    first_index = next(
+        (
+            i
+            for i, e in enumerate(sorted_events)
+            if abs(parse_timestamp(e.get('matchTimestamp', '00:00:00.000')) - first_ts) < 0.001
+        ),
+        None,
+    )
+    if first_index is None or first_index <= 0:
+        return []
+    start = max(0, first_index - context_events)
+    return list(reversed(sorted_events[start:first_index]))
+
+
 def enrich_possessions_with_context(
     possessions: Dict[int, List[Dict[str, Any]]],
     all_events: List[Dict[str, Any]],
@@ -80,55 +105,31 @@ def enrich_possessions_with_context(
     Returns:
         Dictionary mapping possessionId to dict with 'events' and optionally 'preceding_events'
     """
-    # Create a timestamp-indexed lookup for fast event finding
-    event_by_timestamp = {}
-    for event in all_events:
-        timestamp = parse_timestamp(event.get('matchTimestamp', '00:00:00.000'))
-        event_by_timestamp[timestamp] = event
-    
-    # Sort events by timestamp for binary search
-    sorted_timestamps = sorted(event_by_timestamp.keys())
-    
     enriched_possessions = {}
-    
+
     for possession_id, possession_events in possessions.items():
         if not possession_events:
             enriched_possessions[possession_id] = {
                 'events': possession_events,
-                'preceding_events': []
+                'preceding_events': [],
+                'starts_with_set_piece': False,
             }
             continue
-        
+
         first_event = possession_events[0]
-        first_timestamp = parse_timestamp(first_event.get('matchTimestamp', '00:00:00.000'))
-        
-        # Check if possession starts with set piece
         is_set_piece = is_set_piece_event(first_event)
-        
-        preceding_events = []
-        
-        if not is_set_piece:
-            # Find preceding events
-            # Find the index of the first event in sorted timestamps
-            try:
-                first_index = sorted_timestamps.index(first_timestamp)
-                
-                # Get up to context_events preceding events
-                start_index = max(0, first_index - context_events)
-                preceding_timestamps = sorted_timestamps[start_index:first_index]
-                
-                # Extract events in reverse order (most recent first)
-                preceding_events = [event_by_timestamp[ts] for ts in reversed(preceding_timestamps)]
-            except ValueError:
-                # Timestamp not found, skip preceding events
-                pass
-        
+        preceding_events = (
+            _preceding_events_before_possession(first_event, all_events, context_events)
+            if not is_set_piece
+            else []
+        )
+
         enriched_possessions[possession_id] = {
             'events': possession_events,
             'preceding_events': preceding_events,
-            'starts_with_set_piece': is_set_piece
+            'starts_with_set_piece': is_set_piece,
         }
-    
+
     return enriched_possessions
 
 
@@ -170,88 +171,6 @@ def extract_possessions(events_data: Dict[str, Any]) -> Dict[int, List[Dict[str,
         possessions[possession_id].sort(key=lambda e: parse_timestamp(e.get('matchTimestamp', '00:00:00.000')))
     
     return possessions
-
-
-def is_set_piece_event(event: Dict[str, Any]) -> bool:
-    """
-    Check if an event represents a set piece (ball stopped).
-    
-    Args:
-        event: Event dictionary
-    
-    Returns:
-        True if event is a set piece (goal_kick, corner, free_kick, throw_in)
-    """
-    event_type = event.get('type', {})
-    type_primary = event_type.get('primary', '') if isinstance(event_type, dict) else ''
-    set_piece_types = {'goal_kick', 'corner', 'free_kick', 'throw_in'}
-    return type_primary in set_piece_types
-
-
-def enrich_possessions_with_context(
-    possessions: Dict[int, List[Dict[str, Any]]],
-    all_events: List[Dict[str, Any]],
-    context_events: int = 5
-) -> Dict[int, Dict[str, Any]]:
-    """
-    Enrich possessions with preceding events when they don't start with set pieces.
-    
-    Args:
-        possessions: Dictionary mapping possessionId to list of events
-        all_events: All events from the match (sorted by timestamp)
-        context_events: Number of preceding events to include (default: 5)
-    
-    Returns:
-        Dictionary mapping possessionId to dict with 'events' and optionally 'preceding_events'
-    """
-    # Sort all events by timestamp
-    sorted_events = sorted(all_events, key=lambda e: parse_timestamp(e.get('matchTimestamp', '00:00:00.000')))
-    
-    # Create a list of (timestamp, index) for binary search
-    event_timestamps = [(parse_timestamp(e.get('matchTimestamp', '00:00:00.000')), i) 
-                        for i, e in enumerate(sorted_events)]
-    
-    enriched_possessions = {}
-    
-    for possession_id, possession_events in possessions.items():
-        if not possession_events:
-            enriched_possessions[possession_id] = {
-                'events': possession_events,
-                'preceding_events': [],
-                'starts_with_set_piece': False
-            }
-            continue
-        
-        first_event = possession_events[0]
-        first_timestamp = parse_timestamp(first_event.get('matchTimestamp', '00:00:00.000'))
-        
-        # Check if possession starts with set piece
-        is_set_piece = is_set_piece_event(first_event)
-        
-        preceding_events = []
-        
-        if not is_set_piece:
-            # Find the index of the first event in sorted events
-            first_index = None
-            for ts, idx in event_timestamps:
-                if abs(ts - first_timestamp) < 0.001:  # Small tolerance for floating point comparison
-                    first_index = idx
-                    break
-            
-            if first_index is not None and first_index > 0:
-                # Get up to context_events preceding events
-                start_index = max(0, first_index - context_events)
-                preceding_events = sorted_events[start_index:first_index]
-                # Reverse to have most recent first (closest to possession start)
-                preceding_events = list(reversed(preceding_events))
-        
-        enriched_possessions[possession_id] = {
-            'events': possession_events,
-            'preceding_events': preceding_events,
-            'starts_with_set_piece': is_set_piece
-        }
-    
-    return enriched_possessions
 
 
 def calculate_distance(point1: Dict[str, float], point2: Dict[str, float]) -> float:
@@ -395,6 +314,194 @@ def get_match_state_at_timestamp(
     }
 
 
+def _event_team_id(event: Dict[str, Any]) -> Any:
+    team = event.get('team', {})
+    if isinstance(team, dict) and team.get('id') is not None:
+        return team.get('id')
+    return event.get('teamId')
+
+
+def _same_team_id(a: Any, b: Any) -> bool:
+    """Wyscout JSON may use int or str for ids; strict ``==`` skips coordinate flips."""
+    if a is None or b is None:
+        return False
+    return str(a) == str(b)
+
+
+def _possession_core(
+    first_event: Dict[str, Any],
+    possession_events: List[Dict[str, Any]],
+) -> tuple[Any, Any, Optional[str], Dict[str, Any], int]:
+    possession = first_event.get('possession', {})
+    if not isinstance(possession, dict):
+        possession = {}
+    pid = possession.get('id')
+    if pid is None:
+        pid = first_event.get('possessionId')
+    team_id = None
+    team_name = None
+    pt = possession.get('team', {})
+    if isinstance(pt, dict):
+        team_id = pt.get('id')
+        team_name = pt.get('name')
+    if team_id is None:
+        t = first_event.get('team', {})
+        if isinstance(t, dict):
+            team_id = t.get('id')
+            if team_name is None:
+                team_name = t.get('name')
+        if team_id is None:
+            team_id = first_event.get('teamId')
+    n = len(possession_events)
+    if possession.get('eventsNumber') is not None:
+        n = possession['eventsNumber']
+    return pid, team_id, team_name, possession, n
+
+
+def _duration_seconds(
+    possession: Dict[str, Any],
+    first_event: Dict[str, Any],
+    last_event: Dict[str, Any],
+) -> float:
+    duration = 0.0
+    raw = possession.get('duration') if possession else None
+    if raw is not None:
+        try:
+            duration = float(raw)
+        except (ValueError, TypeError):
+            pass
+    if duration == 0.0:
+        span = parse_timestamp(last_event.get('matchTimestamp', '00:00:00.000')) - parse_timestamp(
+            first_event.get('matchTimestamp', '00:00:00.000')
+        )
+        duration = max(0.0, span)
+    return duration
+
+
+def _opponent_team_id_and_name(
+    team_in_possession: Any,
+    match_info: Dict[str, Any],
+) -> tuple[Optional[int], Optional[str]]:
+    teams_data = match_info.get('teamsData')
+    if not isinstance(teams_data, dict):
+        return None, None
+    for tid, data in teams_data.items():
+        if str(tid) == str(team_in_possession):
+            continue
+        oid = int(tid) if isinstance(tid, str) else tid
+        info = data.get('team', {})
+        oname = info.get('name') if isinstance(info, dict) else None
+        return oid, oname
+    return None, None
+
+
+def _pass_count_and_avg_speed(
+    possession_events: List[Dict[str, Any]],
+    team_in_possession: Any,
+) -> tuple[int, float]:
+    """Passes and speed only for ``team_in_possession``; time delta = clock to next event in full sequence (same as SQL LEAD)."""
+    total_d = 0.0
+    total_t = 0.0
+    n_pass = 0
+    for i, event in enumerate(possession_events):
+        if not _same_team_id(_event_team_id(event), team_in_possession):
+            continue
+        et = event.get('type', {})
+        primary = et.get('primary', '') if isinstance(et, dict) else ''
+        if primary != 'pass':
+            continue
+        n_pass += 1
+        loc = event.get('location', {})
+        pd = event.get('pass', {})
+        end = pd.get('endLocation', {}) if isinstance(pd, dict) else {}
+        if loc and end:
+            total_d += calculate_distance(loc, end)
+            if i + 1 < len(possession_events):
+                dt = (
+                    parse_timestamp(possession_events[i + 1].get('matchTimestamp', '00:00:00.000'))
+                    - parse_timestamp(event.get('matchTimestamp', '00:00:00.000'))
+                )
+                if dt > 0:
+                    total_t += dt
+    return n_pass, (total_d / total_t if total_t > 0 else 0.0)
+
+
+def _time_in_thirds_percentages(
+    events: List[Dict[str, Any]],
+    team_in_possession: Any,
+) -> Dict[str, float]:
+    """Thirds by event count for ``team_in_possession``; ``events`` must be in possessing-team pitch space."""
+    d = m = a = 0
+    for event in events:
+        if not _same_team_id(_event_team_id(event), team_in_possession):
+            continue
+        loc = event.get('location', {})
+        if not loc:
+            continue
+        x = loc.get('x', 50)
+        if x < 33:
+            d += 1
+        elif x <= 66:
+            m += 1
+        else:
+            a += 1
+    tot = d + m + a
+    if tot == 0:
+        return {'defensive': 0.0, 'middle': 0.0, 'attacking': 0.0}
+    return {
+        'defensive': 100.0 * d / tot,
+        'middle': 100.0 * m / tot,
+        'attacking': 100.0 * a / tot,
+    }
+
+
+def _x_advancement_for_team(
+    possession_events: List[Dict[str, Any]],
+    team_in_possession: Any,
+) -> float:
+    """Delta x (Wyscout pitch) from first to last event of the possessing team, in chronological order."""
+    first_x: Optional[float] = None
+    last_x: Optional[float] = None
+    for e in possession_events:
+        if not _same_team_id(_event_team_id(e), team_in_possession):
+            continue
+        loc = e.get('location', {})
+        if not loc:
+            continue
+        x = float(loc.get('x', 50))
+        if first_x is None:
+            first_x = x
+        last_x = x
+    if first_x is None or last_x is None:
+        return 0.0
+    return last_x - first_x
+
+
+def _players_involved_from_events(
+    possession_events: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen: set[Any] = set()
+    for event in possession_events:
+        player = event.get('player', {})
+        pid = player.get('id') if isinstance(player, dict) else None
+        if pid is None:
+            pid = event.get('playerId')
+        # Wyscout uses player id 0 for the ball — not a person.
+        if pid is None or pid == 0 or pid == '0' or pid in seen:
+            continue
+        seen.add(pid)
+        pname = None
+        if isinstance(player, dict):
+            pname = player.get('shortName') or player.get('name')
+        row: Dict[str, Any] = {'id': pid, 'name': pname or f'Player {pid}'}
+        ev_tid = _event_team_id(event)
+        if ev_tid is not None:
+            row['team_id'] = ev_tid
+        out.append(row)
+    return out
+
+
 def analyze_possession(
     possession_events: List[Dict[str, Any]],
     match_info: Dict[str, Any],
@@ -404,14 +511,14 @@ def analyze_possession(
 ) -> Dict[str, Any]:
     """
     Analyze a single possession and calculate all metrics.
-    
+
     Args:
         possession_events: List of events belonging to the possession (sorted by timestamp)
         match_info: Match details containing team info, scores, periods
         all_match_events: Optional list of all events from the match (for extracting preceding events)
         player_id: Optional player ID (deprecated, kept for backward compatibility but not used)
         context_events: Number of preceding events to include when possession doesn't start with set piece (default: 5)
-    
+
     Returns:
         Dictionary containing all possession metrics:
         - possession_id: ID of the possession
@@ -423,263 +530,57 @@ def analyze_possession(
         - duration: Duration in seconds
         - pass_count: Number of pass events
         - avg_pass_speed: Average pass speed (distance/time) in units per second
-        - total_x_advancement: Maximum x-axis advancement (max(x) - min(x))
-        - time_in_thirds: Dictionary with percentages for defensive/middle/attacking thirds
+        - total_x_advancement: x delta from first to last event of the team in possession (chronological)
+        - time_in_thirds: % of possessing-team events (by count) in each third (computed in possessing-team pitch space)
         - ball_circulation_count: Number of left-right circulation transitions
         - match_state: Dictionary with scores and leading team at possession start
-        - players_involved: List of dicts with 'id' and 'name' for all players involved (both teams)
+        - players_involved: List of dicts with 'id', 'name', and 'team_id' (when known) for all players involved
         - temporal_moment: Dictionary with period and matchTimestamp
-        - preceding_events: Original preceding events (for reference)
-        - flipped_events: Possession events with coordinates flipped for opponent team (ready for visualization/prompt)
-        - flipped_preceding_events: Preceding events with coordinates flipped (ready for prompt)
+        - preceding_events: Preceding context events (raw Wyscout coordinates)
+        - possession_events: Same possession sequence as input (raw Wyscout coordinates); flip for LLM is done in ``possession_description`` when building the prompt
     """
+    del player_id  # deprecated
     if not possession_events:
         return {}
-    
+
     first_event = possession_events[0]
     last_event = possession_events[-1]
-    
-    # Extract preceding events if possession doesn't start with set piece
-    preceding_events = []
-    if all_match_events is not None:
-        is_set_piece = is_set_piece_event(first_event)
-        
-        if not is_set_piece:
-            # Sort all events by timestamp
-            sorted_events = sorted(all_match_events, key=lambda e: parse_timestamp(e.get('matchTimestamp', '00:00:00.000')))
-            
-            # Find the index of the first event in sorted events
-            first_timestamp = parse_timestamp(first_event.get('matchTimestamp', '00:00:00.000'))
-            first_index = None
-            
-            for i, event in enumerate(sorted_events):
-                event_timestamp = parse_timestamp(event.get('matchTimestamp', '00:00:00.000'))
-                if abs(event_timestamp - first_timestamp) < 0.001:  # Small tolerance for floating point comparison
-                    first_index = i
-                    break
-            
-            if first_index is not None and first_index > 0:
-                # Get up to context_events preceding events
-                start_index = max(0, first_index - context_events)
-                preceding_events = sorted_events[start_index:first_index]
-                # Reverse to have most recent first (closest to possession start)
-                preceding_events = list(reversed(preceding_events))
-    
-    # Basic metrics - extract from possession object if available
-    possession = first_event.get('possession', {})
-    possession_id = possession.get('id') if isinstance(possession, dict) else None
-    if possession_id is None:
-        possession_id = first_event.get('possessionId')
-    
-    # Get team in possession from possession.team.id and name
-    team_in_possession = None
-    team_in_possession_name = None
-    if isinstance(possession, dict):
-        possession_team = possession.get('team', {})
-        if isinstance(possession_team, dict):
-            team_in_possession = possession_team.get('id')
-            team_in_possession_name = possession_team.get('name')
-    
-    # Fallback to event team if not in possession object
-    if team_in_possession is None:
-        team = first_event.get('team', {})
-        if isinstance(team, dict):
-            team_in_possession = team.get('id')
-            if team_in_possession_name is None:
-                team_in_possession_name = team.get('name')
-        if team_in_possession is None:
-            team_in_possession = first_event.get('teamId')
-    
-    # Get opponent team and build flipped events early (for time_in_thirds from team-in-possession perspective)
-    opponent_team_name = None
-    opponent_team_id = None
-    if 'teamsData' in match_info:
-        teams_data = match_info['teamsData']
-        for team_id, team_data in teams_data.items():
-            if str(team_id) != str(team_in_possession):
-                opponent_team_id = int(team_id) if isinstance(team_id, str) else team_id
-                team_info = team_data.get('team', {})
-                if isinstance(team_info, dict):
-                    opponent_team_name = team_info.get('name')
-                break
-    
-    flipped_possession_events = possession_events
-    flipped_preceding_events = preceding_events if preceding_events else []
-    if opponent_team_id is not None and team_in_possession is not None:
-        flipped_possession_events = flip_coordinates_for_defensive_team(
-            possession_events,
-            opponent_team_id
+
+    preceding_events: List[Dict[str, Any]] = []
+    if all_match_events is not None and not is_set_piece_event(first_event):
+        preceding_events = _preceding_events_before_possession(
+            first_event, all_match_events, context_events
         )
-        if preceding_events:
-            flipped_preceding_events = flip_coordinates_for_defensive_team(
-                preceding_events,
-                opponent_team_id
-            )
-    
-    # Get number of events - use possession.eventsNumber if available, otherwise count
-    num_events = len(possession_events)
-    if isinstance(possession, dict):
-        possession_events_number = possession.get('eventsNumber')
-        if possession_events_number is not None:
-            # Verify consistency (use possession value as authoritative)
-            num_events = possession_events_number
-    
-    # Duration calculation - prefer possession.duration if available
-    duration = 0.0
-    if isinstance(possession, dict):
-        possession_duration_str = possession.get('duration')
-        if possession_duration_str is not None:
-            try:
-                duration = float(possession_duration_str)
-            except (ValueError, TypeError):
-                pass
-    
-    # Fallback to calculating from timestamps if possession duration not available
-    if duration == 0.0:
-        first_timestamp = parse_timestamp(first_event.get('matchTimestamp', '00:00:00.000'))
-        last_timestamp = parse_timestamp(last_event.get('matchTimestamp', '00:00:00.000'))
-        duration = last_timestamp - first_timestamp
-        if duration < 0:
-            duration = 0
-    
-    # Pass analysis - type.primary == "pass"
-    pass_events = []
-    for event in possession_events:
-        event_type = event.get('type', {})
-        type_primary = event_type.get('primary', '') if isinstance(event_type, dict) else ''
-        if type_primary == 'pass':
-            pass_events.append(event)
-    
-    pass_count = len(pass_events)
-    
-    # Calculate average pass speed
-    total_pass_distance = 0.0
-    total_pass_time = 0.0
-    
-    for i, pass_event in enumerate(pass_events):
-        location = pass_event.get('location', {})
-        pass_data = pass_event.get('pass', {})
-        end_location = pass_data.get('endLocation', {})
-        
-        if location and end_location:
-            distance = calculate_distance(location, end_location)
-            total_pass_distance += distance
-            
-            # Calculate time difference with next event (if exists)
-            event_index = possession_events.index(pass_event)
-            if event_index < len(possession_events) - 1:
-                next_event = possession_events[event_index + 1]
-                pass_timestamp = parse_timestamp(pass_event.get('matchTimestamp', '00:00:00.000'))
-                next_timestamp = parse_timestamp(next_event.get('matchTimestamp', '00:00:00.000'))
-                time_diff = next_timestamp - pass_timestamp
-                if time_diff > 0:
-                    total_pass_time += time_diff
-    
-    avg_pass_speed = total_pass_distance / total_pass_time if total_pass_time > 0 else 0.0
-    
-    # X-axis advancement - only for events of team in possession
-    x_coordinates = []
-    for event in possession_events:
-        # Filter by team in possession
-        event_team = event.get('team', {})
-        event_team_id = event_team.get('id') if isinstance(event_team, dict) else None
-        if event_team_id is None:
-            event_team_id = event.get('teamId')
-        
-        # Only consider events from team in possession
-        if event_team_id != team_in_possession:
-            continue
-        
-        # Include all events from team in possession
-        location = event.get('location', {})
-        if location:
-            x = location.get('x', 50)
-            x_coordinates.append(x)
-    
-    total_x_advancement = max(x_coordinates) - min(x_coordinates) if x_coordinates else 0
-    
-    # Time in thirds (from team-in-possession perspective: use flipped events)
-    defensive_third_count = 0
-    middle_third_count = 0
-    attacking_third_count = 0
-    
-    for event in flipped_possession_events:
-        location = event.get('location', {})
-        if location:
-            x = location.get('x', 50)
-            if x < 33:
-                defensive_third_count += 1
-            elif x <= 66:
-                middle_third_count += 1
-            else:
-                attacking_third_count += 1
-    
-    total_with_location = defensive_third_count + middle_third_count + attacking_third_count
-    if total_with_location > 0:
-        time_in_thirds = {
-            'defensive': (defensive_third_count / total_with_location) * 100,
-            'middle': (middle_third_count / total_with_location) * 100,
-            'attacking': (attacking_third_count / total_with_location) * 100
-        }
-    else:
-        time_in_thirds = {
-            'defensive': 0.0,
-            'middle': 0.0,
-            'attacking': 0.0
-        }
-    
-    # Ball circulation - only for events of team in possession
-    team_possession_events = []
-    for event in possession_events:
-        event_team = event.get('team', {})
-        event_team_id = event_team.get('id') if isinstance(event_team, dict) else None
-        if event_team_id is None:
-            event_team_id = event.get('teamId')
-        
-        if event_team_id == team_in_possession:
-            team_possession_events.append(event)
-    
-    ball_circulation_count = count_ball_circulation(team_possession_events)
-    
-    # Match state at possession start
-    # Use all_match_events if provided, otherwise try to get from match_info
-    events_for_match_state = all_match_events if all_match_events is not None else match_info.get('all_events', [])
-    first_timestamp_seconds = parse_timestamp(first_event.get('matchTimestamp', '00:00:00.000'))
+
+    possession_id, team_in_possession, team_in_possession_name, possession, num_events = _possession_core(
+        first_event, possession_events
+    )
+    duration = _duration_seconds(possession, first_event, last_event)
+    opponent_team_id, opponent_team_name = _opponent_team_id_and_name(team_in_possession, match_info)
+
+    events_for_thirds: List[Dict[str, Any]] = possession_events
+    if opponent_team_id is not None and team_in_possession is not None:
+        events_for_thirds = flip_coordinates_for_defensive_team(
+            possession_events, opponent_team_id
+        )
+
+    pass_count, avg_pass_speed = _pass_count_and_avg_speed(possession_events, team_in_possession)
+    total_x_advancement = _x_advancement_for_team(possession_events, team_in_possession)
+    time_in_thirds = _time_in_thirds_percentages(events_for_thirds, team_in_possession)
+    team_only = [
+        e for e in possession_events if _same_team_id(_event_team_id(e), team_in_possession)
+    ]
+    ball_circulation_count = count_ball_circulation(team_only)
+
+    events_for_match_state = (
+        all_match_events if all_match_events is not None else match_info.get('all_events', [])
+    )
     match_state = get_match_state_at_timestamp(
         match_info,
-        first_timestamp_seconds,
-        events_for_match_state
+        parse_timestamp(first_event.get('matchTimestamp', '00:00:00.000')),
+        events_for_match_state,
     )
-    
-    # Players involved - include players from both teams (for defensive analysis)
-    # Store both IDs and names for LLM context
-    players_involved = []  # List of dicts with id and name
-    players_seen = set()  # Track IDs to avoid duplicates
-    
-    for event in possession_events:
-        player = event.get('player', {})
-        player_id = player.get('id') if isinstance(player, dict) else None
-        if player_id is None:
-            player_id = event.get('playerId')
-        
-        if player_id is not None and player_id not in players_seen:
-            players_seen.add(player_id)
-            # Extract player name
-            player_name = None
-            if isinstance(player, dict):
-                player_name = player.get('shortName') or player.get('name')
-            
-            players_involved.append({
-                'id': player_id,
-                'name': player_name or f"Player {player_id}"
-            })
-    
-    # Temporal moment
-    temporal_moment = {
-        'period': first_event.get('matchPeriod'),
-        'matchTimestamp': first_event.get('matchTimestamp', '00:00:00.000')
-    }
-    
+
     return {
         'possession_id': possession_id,
         'num_events': num_events,
@@ -694,11 +595,13 @@ def analyze_possession(
         'time_in_thirds': time_in_thirds,
         'ball_circulation_count': ball_circulation_count,
         'match_state': match_state,
-        'players_involved': players_involved,  # List of dicts with 'id' and 'name'
-        'temporal_moment': temporal_moment,
-        'preceding_events': preceding_events if preceding_events else [],  # Original preceding events (for reference)
-        'flipped_events': flipped_possession_events,  # Possession events with flipped coordinates
-        'flipped_preceding_events': flipped_preceding_events  # Preceding events with flipped coordinates
+        'players_involved': _players_involved_from_events(possession_events),
+        'temporal_moment': {
+            'period': first_event.get('matchPeriod'),
+            'matchTimestamp': first_event.get('matchTimestamp', '00:00:00.000'),
+        },
+        'preceding_events': list(preceding_events),
+        'possession_events': list(possession_events),
     }
 
 
@@ -716,21 +619,13 @@ def get_opponent_team_id(
     Returns:
         Opponent team ID or None if not found
     """
-    if team_in_possession_id is None:
-        return None
-    
-    if 'teamsData' in match_info:
-        teams_data = match_info['teamsData']
-        for team_id in teams_data.keys():
-            if str(team_id) != str(team_in_possession_id):
-                return int(team_id) if isinstance(team_id, str) else team_id
-    
-    return None
+    oid, _ = _opponent_team_id_and_name(team_in_possession_id, match_info)
+    return oid
 
 
 def flip_coordinates_for_defensive_team(
     events: List[Dict[str, Any]],
-    defensive_team_id: int
+    defensive_team_id: Any,
 ) -> List[Dict[str, Any]]:
     """
     Flip coordinates for events belonging to the defensive team.
@@ -756,14 +651,7 @@ def flip_coordinates_for_defensive_team(
         # Create a deep copy to avoid modifying the original event
         flipped_event = copy.deepcopy(event)
         
-        # Extract team ID (handle both nested 'team' dict and direct 'teamId')
-        team = event.get('team', {})
-        team_id = team.get('id') if isinstance(team, dict) else None
-        if team_id is None:
-            team_id = event.get('teamId')
-        
-        # Only flip coordinates for defensive team events
-        if team_id == defensive_team_id:
+        if _same_team_id(_event_team_id(event), defensive_team_id):
             # Flip location coordinates
             location = flipped_event.get('location')
             if location and isinstance(location, dict):

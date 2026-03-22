@@ -5,6 +5,8 @@ Use this module for notebooks, tests, or LLM prep without importing ``possession
 Constants and flipped-x / third labels match the SQL definitions.
 
 Notes:
+- **pass_count**, **avg_pass_speed**, **time in thirds** (seconds + %), **third_start/end** use only
+  rows where ``team_id = possession_team_id``. **ball_circulation_count** already did.
 - **avg_pass_speed** in SQL uses Wyscout 0–100 grid distance per second (same unit as
   ``possession_analyzer.calculate_distance``), time = next event clock delta (minute/second).
 - **ball_circulation_count** in SQL uses **raw** ``location_y`` (Wyscout), same as the analyzer:

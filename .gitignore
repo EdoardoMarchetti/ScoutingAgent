@@ -93,5 +93,6 @@ models/*.bin
 .bruin.yml
 
 .secrets/*
+!.secrets/.gitkeep
 logs/runs
 logs/*.log

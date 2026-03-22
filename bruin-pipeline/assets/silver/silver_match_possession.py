@@ -32,6 +32,8 @@ columns:
     type: integer
   - name: event_index
     type: integer
+  - name: duration
+    type: float64
   - name: types_json
     type: string
   - name: attack_payload
@@ -152,6 +154,7 @@ def materialize():
                 "team_id",
                 "events_number",
                 "event_index",
+                "duration",
                 "types_json",
                 "attack_payload",
                 "source_gcs_uri",

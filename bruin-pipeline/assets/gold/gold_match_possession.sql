@@ -37,6 +37,8 @@ columns:
     type: int64
   - name: event_index
     type: int64
+  - name: duration
+    type: float64
   - name: source_gcs_uri
     type: string
   - name: types_json
@@ -223,17 +225,47 @@ poss_agg AS (
   SELECT
     s.match_id,
     s.possession_id,
-    COUNTIF(s.type_primary = 'pass') AS pass_count,
-    SUM(IF(s.x_third = 'defensive', s.seg_sec, 0.0)) AS time_defensive_third_sec,
-    SUM(IF(s.x_third = 'middle', s.seg_sec, 0.0)) AS time_middle_third_sec,
-    SUM(IF(s.x_third = 'attacking', s.seg_sec, 0.0)) AS time_attacking_third_sec,
-    SUM(s.seg_sec) AS total_seg_sec,
-    ARRAY_AGG(s.x_third IGNORE NULLS ORDER BY s.minute, s.second, s.event_id LIMIT 1)[
-      SAFE_OFFSET(0)
-    ] AS third_start,
-    ARRAY_AGG(s.x_third IGNORE NULLS ORDER BY s.minute DESC, s.second DESC, s.event_id DESC LIMIT 1)[
-      SAFE_OFFSET(0)
-    ] AS third_end
+    COUNTIF(s.type_primary = 'pass' AND s.team_id = s.possession_team_id) AS pass_count,
+    SUM(
+      IF(
+        s.team_id = s.possession_team_id AND s.x_third = 'defensive',
+        s.seg_sec,
+        0.0
+      )
+    ) AS time_defensive_third_sec,
+    SUM(
+      IF(s.team_id = s.possession_team_id AND s.x_third = 'middle', s.seg_sec, 0.0)
+    ) AS time_middle_third_sec,
+    SUM(
+      IF(
+        s.team_id = s.possession_team_id AND s.x_third = 'attacking',
+        s.seg_sec,
+        0.0
+      )
+    ) AS time_attacking_third_sec,
+    SUM(IF(s.team_id = s.possession_team_id, s.seg_sec, 0.0)) AS total_seg_sec,
+    (
+      SELECT s2.x_third
+      FROM ev_seg AS s2
+      WHERE
+        s2.match_id = s.match_id
+        AND s2.possession_id = s.possession_id
+        AND s2.team_id = s2.possession_team_id
+        AND s2.x_third IS NOT NULL
+      ORDER BY s2.minute, s2.second, s2.event_id
+      LIMIT 1
+    ) AS third_start,
+    (
+      SELECT s2.x_third
+      FROM ev_seg AS s2
+      WHERE
+        s2.match_id = s.match_id
+        AND s2.possession_id = s.possession_id
+        AND s2.team_id = s2.possession_team_id
+        AND s2.x_third IS NOT NULL
+      ORDER BY s2.minute DESC, s2.second DESC, s2.event_id DESC
+      LIMIT 1
+    ) AS third_end
   FROM ev_seg AS s
   GROUP BY 1, 2
 ),
@@ -269,7 +301,8 @@ pass_speed AS (
     ) AS avg_pass_speed
   FROM ev_seg AS s
   WHERE
-    s.type_primary = 'pass'
+    s.team_id = s.possession_team_id
+    AND s.type_primary = 'pass'
     AND s.pass_json IS NOT NULL
     AND JSON_VALUE(s.pass_json, '$.endLocation.x') IS NOT NULL
     AND JSON_VALUE(s.pass_json, '$.endLocation.y') IS NOT NULL
@@ -367,6 +400,7 @@ SELECT
   p.team_id,
   p.events_number,
   p.event_index,
+  CAST(p.duration AS FLOAT64) AS duration,
   p.source_gcs_uri,
   p.types_json,
   EXISTS (SELECT 1 FROM UNNEST(p.types_arr) AS t WHERE t = 'attack') AS is_attack,

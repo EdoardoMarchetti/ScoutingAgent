@@ -25,6 +25,15 @@ variables:
   fixture_fetch:
     type: string
     default: ""
+  # LLM pipeline (match_id): 0 = no rows. Run prompts (Python) then descriptions (BQ AI.GENERATE_TEXT).
+  match_id:
+    type: integer
+    minimum: 0
+    default: 0
+  # BigQuery ML remote model full id: `project.dataset.model` (CREATE MODEL … OPTIONS(ENDPOINT=…)).
+  bqml_generate_model:
+    type: string
+    default: "sport-data-campus.scouting_agent.bqml_gemini_generate"
 
 # silver_match_possession: merge on (match_id, possession_id); qualifiers in gold_match_possession (SQL).
 # gold_match_possession: first run --full-refresh (delete+insert needs target table to exist).
@@ -35,3 +44,7 @@ variables:
 # (season_id if non-zero else active dim_season; optional match_from_date + match_to_date).
 # bruin run --full-refresh on those assets = full rebuild from all silver (no scope join).
 # After narrowing the date window + silver purge, run --full-refresh on gold once if you need to drop gold rows for matches no longer in silver.
+# gold_match_possession_llm_prompts: Python builds prompts from silver_match_event + gold_match_possession overlay + dims (merge).
+# gold_match_possession_llm_general: Python runs ML.GENERATE_TEXT via BigQuery client. merge on (match_id, possession_id, description_type); no incremental_key on match_id (avoids date-window vs int in ingestr). One-off: BQ remote model (assets/init/create_bqml_gemini_remote_model.sql).
+# Example: bruin run bruin-pipeline/assets/gold/gold_match_possession_llm_prompts.py --var match_id=123456
+#          bruin run bruin-pipeline/assets/gold/gold_match_possession_llm_general.py --var match_id=123456

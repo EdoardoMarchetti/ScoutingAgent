@@ -1,0 +1,11 @@
+-- Run once in BigQuery (Console or `bq query`) after creating a Cloud Resource Connection
+-- for Vertex AI in the same region as the dataset.
+-- Replace: CONNECTION, endpoint, dataset name as needed.
+--
+-- Example:
+-- CREATE MODEL `sport-data-campus.scouting_agent.bqml_gemini_generate`
+-- REMOTE WITH CONNECTION `sport-data-campus.us.vertex-ai`
+-- OPTIONS (ENDPOINT = 'gemini-2.5-flash-lite');
+--
+-- Consumed by gold_match_possession_llm_general.py via ML.GENERATE_TEXT (column ml_generate_text_llm_result).
+-- Docs: https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-remote-model
