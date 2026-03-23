@@ -131,6 +131,7 @@ silver AS (
     sp.events_number,
     sp.event_index,
     sp.types_json,
+    sp.duration,
     sp.attack_payload,
     sp.source_gcs_uri
   FROM `scouting_agent.silver_match_possession` AS sp
@@ -221,6 +222,44 @@ ev_seg AS (
     END AS seg_sec
   FROM ev_third AS t
 ),
+third_bounds AS (
+  SELECT
+    z.match_id,
+    z.possession_id,
+    MAX(
+      IF(
+        z.rn_start = 1,
+        z.x_third,
+        CAST(NULL AS STRING)
+      )
+    ) AS third_start,
+    MAX(
+      IF(
+        z.rn_end = 1,
+        z.x_third,
+        CAST(NULL AS STRING)
+      )
+    ) AS third_end
+  FROM (
+    SELECT
+      s.match_id,
+      s.possession_id,
+      s.x_third,
+      ROW_NUMBER() OVER (
+        PARTITION BY s.match_id, s.possession_id
+        ORDER BY s.minute, s.second, s.event_id
+      ) AS rn_start,
+      ROW_NUMBER() OVER (
+        PARTITION BY s.match_id, s.possession_id
+        ORDER BY s.minute DESC, s.second DESC, s.event_id DESC
+      ) AS rn_end
+    FROM ev_seg AS s
+    WHERE
+      s.team_id = s.possession_team_id
+      AND s.x_third IS NOT NULL
+  ) AS z
+  GROUP BY 1, 2
+),
 poss_agg AS (
   SELECT
     s.match_id,
@@ -244,30 +283,15 @@ poss_agg AS (
       )
     ) AS time_attacking_third_sec,
     SUM(IF(s.team_id = s.possession_team_id, s.seg_sec, 0.0)) AS total_seg_sec,
-    (
-      SELECT s2.x_third
-      FROM ev_seg AS s2
-      WHERE
-        s2.match_id = s.match_id
-        AND s2.possession_id = s.possession_id
-        AND s2.team_id = s2.possession_team_id
-        AND s2.x_third IS NOT NULL
-      ORDER BY s2.minute, s2.second, s2.event_id
-      LIMIT 1
-    ) AS third_start,
-    (
-      SELECT s2.x_third
-      FROM ev_seg AS s2
-      WHERE
-        s2.match_id = s.match_id
-        AND s2.possession_id = s.possession_id
-        AND s2.team_id = s2.possession_team_id
-        AND s2.x_third IS NOT NULL
-      ORDER BY s2.minute DESC, s2.second DESC, s2.event_id DESC
-      LIMIT 1
-    ) AS third_end
+    tb.third_start,
+    tb.third_end
   FROM ev_seg AS s
+  LEFT JOIN third_bounds AS tb
+    ON s.match_id = tb.match_id
+    AND s.possession_id = tb.possession_id
   GROUP BY 1, 2
+  , tb.third_start
+  , tb.third_end
 ),
 poss_pct AS (
   SELECT

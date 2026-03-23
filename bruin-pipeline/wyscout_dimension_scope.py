@@ -16,6 +16,7 @@ from typing import Any
 
 def pipeline_vars() -> dict[str, Any]:
     raw = os.environ.get("BRUIN_VARS")
+    print(raw)
     if not raw:
         return {}
     return json.loads(raw)
@@ -277,13 +278,30 @@ def upload_json_bytes_to_gcs(
 
 
 def fixture_window_dates() -> tuple[str | None, str | None]:
+    def _norm_iso_date(raw: Any, *, source: str, key: str) -> str | None:
+        if raw is None:
+            return None
+        val = str(raw).strip()
+        if not val:
+            return None
+        if not _ISO_DATE.match(val):
+
+            raise ValueError(
+                f"Invalid date format for {source}:{key}={raw!r}. Expected YYYY-MM-DD."
+            )
+        return val
+
     v = pipeline_vars()
-    fd = (v.get("match_from_date") or "").strip()
-    td = (v.get("match_to_date") or "").strip()
-    if not fd:
-        fd = os.environ.get("BRUIN_START_DATE") or None
-    if not td:
-        td = os.environ.get("BRUIN_END_DATE") or None
+    fd = _norm_iso_date(v.get("match_from_date"), source="BRUIN_VARS", key="match_from_date")
+    td = _norm_iso_date(v.get("match_to_date"), source="BRUIN_VARS", key="match_to_date")
+    if fd is None:
+        fd = _norm_iso_date(
+            os.environ.get("BRUIN_START_DATE"), source="ENV", key="BRUIN_START_DATE"
+        )
+    if td is None:
+        td = _norm_iso_date(
+            os.environ.get("BRUIN_END_DATE"), source="ENV", key="BRUIN_END_DATE"
+        )
     return (fd, td)
 
 

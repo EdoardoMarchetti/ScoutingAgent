@@ -38,6 +38,7 @@ columns:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -63,13 +64,61 @@ from wyscout_dimension_scope import (  # noqa: E402
 )
 
 
+def _fixtures_request_debug(
+    *,
+    season_id: int,
+    from_date: str | None,
+    to_date: str | None,
+    details: str,
+    fetch: str | None,
+) -> str:
+    params: dict[str, str] = {"details": details}
+    if fetch:
+        params["fetch"] = fetch
+    if from_date:
+        params["fromDate"] = from_date
+    if to_date:
+        params["toDate"] = to_date
+    q = "&".join(f"{k}={v}" for k, v in params.items())
+    return (
+        f"/seasons/{season_id}/fixtures"
+        + (f"?{q}" if q else "")
+    )
+
+
+def _payload_debug_summary(payload) -> str:
+    if payload == -1:
+        return "payload=-1"
+    if payload is None:
+        return "payload=None"
+    if isinstance(payload, list):
+        return f"payload_type=list len={len(payload)}"
+    if isinstance(payload, dict):
+        keys = list(payload.keys())
+        sample = json.dumps(payload, ensure_ascii=False)[:1200]
+        return f"payload_type=dict keys={keys} sample={sample}"
+    return f"payload_type={type(payload).__name__} repr={repr(payload)[:400]}"
+
+
 def materialize():
     season_ids = season_ids_for_monitoring(_ROOT)
     from_d, to_d = fixture_window_dates()
     details, fetch = fixture_request_options()
+    print(
+        "[dim_match] Fixture filters: "
+        f"season_ids={season_ids}, from={from_d}, to={to_d}, details={details}, fetch={fetch}"
+    )
 
     rows: list[dict] = []
     for season_id in season_ids:
+        req = _fixtures_request_debug(
+            season_id=season_id,
+            from_date=from_d,
+            to_date=to_d,
+            details=details,
+            fetch=fetch,
+        )
+        print(f"[dim_match] API request: {req}")
         payload = wyscout.get_season_fixtures(
             season_id,
             version="v3",
@@ -78,9 +127,12 @@ def materialize():
             fetch=fetch,
             details=details,
         )
+        print(f"[dim_match] API response season_id={season_id}: {_payload_debug_summary(payload)}")
         if payload == -1:
             raise RuntimeError(f"get_season_fixtures failed for season_id={season_id}")
-        for m in matches_from_season_fixtures_payload(payload):
+        matches = matches_from_season_fixtures_payload(payload)
+        print(f"[dim_match] Flattened matches season_id={season_id}: count={len(matches)}")
+        for m in matches:
             row = match_row_from_wyscout(m, season_id)
             if row:
                 rows.append(row)

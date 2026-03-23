@@ -24,6 +24,9 @@ columns:
   - name: description_type
     type: string
     primary_key: true
+  - name: entity_id
+    type: integer
+    primary_key: true
   - name: season_id
     type: integer
   - name: competition_id
@@ -67,6 +70,7 @@ from typing import Any
 
 import pandas as pd
 from dotenv import load_dotenv
+from google.cloud import bigquery
 
 _ROOT = Path(__file__).resolve().parents[3]
 _BRUIN_PL = Path(__file__).resolve().parents[2]
@@ -76,12 +80,16 @@ for p in (_ROOT, _BRUIN_PL):
 
 load_dotenv(_ROOT / ".env")
 
-from wyscout_dimension_scope import bq_client  # noqa: E402
+from wyscout_dimension_scope import (  # noqa: E402
+    bq_client,
+    match_date_window_predicate_sql,
+)
 
 _COLS = [
     "match_id",
     "possession_id",
     "description_type",
+    "entity_id",
     "season_id",
     "competition_id",
     "team_in_possession",
@@ -138,20 +146,66 @@ def _bqml_model_path() -> str:
     return m
 
 
+def _selected_match_ids(bq: Any, project: str, match_id: int) -> list[int]:
+    """
+    - If match_id > 0: include it only if it is inside date scope (when date vars exist).
+    - If match_id <= 0: include all matches in date scope; if no valid date scope, return [].
+    """
+    window_sql = match_date_window_predicate_sql("m.match_date_utc")
+    if match_id > 0:
+        q = f"""
+        SELECT m.match_id
+        FROM `{project}.scouting_agent.dim_match` AS m
+        WHERE m.match_id = @mid
+          {window_sql}
+        LIMIT 1
+        """
+        rows = list(
+            bq.query(
+                q,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[bigquery.ScalarQueryParameter("mid", "INT64", match_id)]
+                ),
+            ).result()
+        )
+        return [int(rows[0]["match_id"])] if rows else []
+    if not window_sql:
+        return []
+    q = f"""
+    SELECT DISTINCT m.match_id
+    FROM `{project}.scouting_agent.dim_match` AS m
+    WHERE m.competition_id IS NOT NULL
+      {window_sql}
+    ORDER BY m.match_id
+    """
+    return [int(r["match_id"]) for r in bq.query(q).result()]
+
+
 def materialize():
     mid = _match_id()
-    if mid <= 0:
-        return pd.DataFrame(columns=_COLS)
 
     model_path = _bqml_model_path()
     bq = bq_client(_ROOT)
     project = bq.project
-
-    sql = f"""
+    selected_mids = _selected_match_ids(bq, project, mid)
+    if not selected_mids:
+        print(
+            f"[llm_general] No matches selected (match_id={mid}, "
+            "date window may be empty or out of scope)."
+        )
+        return pd.DataFrame(columns=_COLS)
+    print(
+        f"[llm_general] Starting description generation for {len(selected_mids)} match(es): "
+        f"{selected_mids}"
+    )
+    chunks: list[pd.DataFrame] = []
+    for one_mid in selected_mids:
+        print(f"[llm_general][match_id={one_mid}] start")
+        sql = f"""
 WITH prompts AS (
   SELECT *
   FROM `{project}.scouting_agent.gold_match_possession_llm_prompts`
-  WHERE match_id = {int(mid)}
+  WHERE match_id = {int(one_mid)}
 ),
 generated AS (
   SELECT *
@@ -170,6 +224,7 @@ SELECT
   p.match_id,
   p.possession_id,
   p.description_type,
+  p.entity_id,
   p.season_id,
   p.competition_id,
   p.team_in_possession,
@@ -190,16 +245,48 @@ INNER JOIN generated AS g
   ON p.match_id = g.match_id
   AND p.possession_id = g.possession_id
   AND p.description_type = g.description_type
+  AND p.entity_id = g.entity_id
 """
-    job = bq.query(sql)
-    df = job.result().to_dataframe(create_bqstorage_client=False)
+        try:
+            job = bq.query(sql)
+            part = job.result().to_dataframe(create_bqstorage_client=False)
+        except Exception as exc:
+            print(f"[llm_general][match_id={one_mid}] failed: {exc}")
+            raise
+        if part.empty:
+            print(f"[llm_general][match_id={one_mid}] done: rows=0")
+            continue
+        cnt = (
+            part.groupby("description_type", dropna=False)
+            .size()
+            .to_dict()
+        )
+        print(
+            f"[llm_general][match_id={one_mid}] done: rows={len(part)} "
+            f"by_type={cnt}"
+        )
+        chunks.append(part)
 
-    if df.empty:
+    if not chunks:
+        print("[llm_general] Completed with 0 generated rows.")
         return pd.DataFrame(columns=_COLS)
+    df = pd.concat(chunks, ignore_index=True)
+    by_match = (
+        df.groupby(["match_id", "description_type"], dropna=False)
+        .size()
+        .reset_index(name="rows")
+        .sort_values(["match_id", "description_type"])
+    )
+    for _, r in by_match.iterrows():
+        print(
+            f"[llm_general][match_id={int(r['match_id'])}] "
+            f"type={r['description_type']} rows={int(r['rows'])}"
+        )
 
     for c in (
         "match_id",
         "possession_id",
+        "entity_id",
         "season_id",
         "competition_id",
         "team_in_possession",
@@ -214,4 +301,5 @@ INNER JOIN generated AS g
     for c in _COLS:
         if c not in df.columns:
             df[c] = None
+    print(f"[llm_general] Completed. Total descriptions={len(df)}")
     return df[_COLS]
