@@ -7,17 +7,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("Scouting Agent")
-st.caption("Multipage dashboard for football analysis with Streamlit.")
+pages = [
+    st.Page("pages/4_Chatbot.py", title="Chatbot", icon="💬", default=True),
+    st.Page("pages/3_Player_Scouting.py", title="Player scouting", icon="⚽"),
+    st.Page("pages/5_Player_Compare.py", title="Player comparison", icon="📊"),
+    st.Page("pages/6_Report_RAG.py", title="Report RAG", icon="🔍"),
+]
 
-st.markdown(
-    """
-Welcome to your multipage app.
-
-Use the sidebar menu to navigate across pages.
-"""
-)
-
-with st.sidebar:
-    st.header("Navigation")
-    st.info("Select a page from the top-left menu.")
+pg = st.navigation(pages)
+pg.run()

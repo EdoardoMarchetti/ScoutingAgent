@@ -97,3 +97,7 @@ models/*.bin
 logs/runs
 logs/*.log
 .streamlit/*
+
+# Player reports (JSON files for RAG, PDFs)
+player_reports/
+!player_reports/.gitkeep

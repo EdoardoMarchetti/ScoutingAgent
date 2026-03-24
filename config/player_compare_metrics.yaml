@@ -1,0 +1,271 @@
+version: "1.0"
+description: "Metrics catalog for player comparison and scouting. Each metric defines how to aggregate data from gold tables."
+
+metrics:
+  # --- Shots & Goals ---
+  - id: shots_total
+    label: "Shots"
+    description: "Total number of shots attempted"
+    source: gold_match_shot_event
+    aggregation: count
+    filter: null
+    value_column: event_id
+    category: finalization
+
+  - id: goals
+    label: "Goals"
+    description: "Total goals scored"
+    source: gold_match_shot_event
+    aggregation: count
+    filter: "shot_is_goal IS TRUE"
+    value_column: event_id
+    category: finalization
+
+  - id: xg_total
+    label: "xG"
+    description: "Total expected goals"
+    source: gold_match_shot_event
+    aggregation: sum
+    filter: null
+    value_column: shot_xg
+    category: finalization
+
+  - id: shots_on_target
+    label: "Shots on target"
+    description: "Shots that were on target"
+    source: gold_match_shot_event
+    aggregation: count
+    filter: "shot_outcome IN ('goal', 'save', 'save_on_post')"
+    value_column: event_id
+    category: finalization
+
+  - id: big_chances
+    label: "Big chances"
+    description: "High xG opportunities (>= 0.3)"
+    source: gold_match_shot_event
+    aggregation: count
+    filter: "is_big_chance_xg IS TRUE"
+    value_column: event_id
+    category: finalization
+
+  # --- Passes ---
+  - id: passes_total
+    label: "Passes"
+    description: "Total passes attempted"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: null
+    value_column: event_id
+    category: build_up
+
+  - id: passes_accurate
+    label: "Accurate passes"
+    description: "Successfully completed passes"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "pass_accurate IS TRUE"
+    value_column: event_id
+    category: build_up
+
+  - id: progressive_passes
+    label: "Progressive passes"
+    description: "Passes advancing play significantly"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "is_progressive_pass IS TRUE"
+    value_column: event_id
+    category: build_up
+
+  - id: key_passes
+    label: "Key passes"
+    description: "Passes leading directly to a shot"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "is_key_pass IS TRUE OR is_shot_assist IS TRUE"
+    value_column: event_id
+    category: build_up
+
+  - id: assists
+    label: "Assists"
+    description: "Passes directly leading to a goal"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "is_assist IS TRUE"
+    value_column: event_id
+    category: build_up
+
+  - id: through_passes
+    label: "Through passes"
+    description: "Passes splitting defensive lines"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "is_through_pass IS TRUE"
+    value_column: event_id
+    category: build_up
+
+  - id: passes_final_third
+    label: "Passes to final third"
+    description: "Passes into attacking third"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "is_pass_to_final_third IS TRUE"
+    value_column: event_id
+    category: build_up
+
+  - id: crosses
+    label: "Crosses"
+    description: "Total crosses into the box"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "is_cross IS TRUE"
+    value_column: event_id
+    category: finalization
+
+  - id: long_passes
+    label: "Long passes"
+    description: "Long-range passes"
+    source: gold_match_pass_event
+    aggregation: count
+    filter: "is_long_pass IS TRUE"
+    value_column: event_id
+    category: build_up
+
+  # --- Duels ---
+  - id: duels_total
+    label: "Duels"
+    description: "Total duels contested"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: null
+    value_column: event_id
+    category: defensive
+
+  - id: duels_won
+    label: "Duels won"
+    description: "Successfully won duels"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: "is_duel_won IS TRUE"
+    value_column: event_id
+    category: defensive
+
+  - id: aerial_duels
+    label: "Aerial duels"
+    description: "Duels contested in the air"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: "duel_type = 'aerial'"
+    value_column: event_id
+    category: defensive
+
+  - id: aerial_duels_won
+    label: "Aerial duels won"
+    description: "Won aerial duels"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: "duel_type = 'aerial' AND is_duel_won IS TRUE"
+    value_column: event_id
+    category: defensive
+
+  - id: ground_duels
+    label: "Ground duels"
+    description: "Duels contested on ground"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: "duel_type = 'ground'"
+    value_column: event_id
+    category: defensive
+
+  - id: ground_duels_won
+    label: "Ground duels won"
+    description: "Won ground duels"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: "duel_type = 'ground' AND is_duel_won IS TRUE"
+    value_column: event_id
+    category: defensive
+
+  - id: dribbles_attempted
+    label: "Dribbles attempted"
+    description: "Take-on attempts"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: "is_dribble IS TRUE"
+    value_column: event_id
+    category: finalization
+
+  - id: dribbles_successful
+    label: "Dribbles successful"
+    description: "Successfully completed dribbles"
+    source: gold_match_duel_event
+    aggregation: count
+    filter: "is_dribble IS TRUE AND is_duel_won IS TRUE"
+    value_column: event_id
+    category: finalization
+
+  # --- Defensive actions ---
+  - id: recoveries
+    label: "Recoveries"
+    description: "Ball recoveries"
+    source: gold_match_recovery_interception_event
+    aggregation: count
+    filter: "is_recovery IS TRUE"
+    value_column: event_id
+    category: defensive
+
+  - id: interceptions
+    label: "Interceptions"
+    description: "Ball interceptions"
+    source: gold_match_recovery_interception_event
+    aggregation: count
+    filter: "is_interception IS TRUE"
+    value_column: event_id
+    category: defensive
+
+  - id: counterpressing_recoveries
+    label: "Counterpressing recoveries"
+    description: "Recoveries in counterpressing situations"
+    source: gold_match_recovery_interception_event
+    aggregation: count
+    filter: "is_counterpressing IS TRUE"
+    value_column: event_id
+    category: defensive
+
+  - id: clearances
+    label: "Clearances"
+    description: "Defensive clearances"
+    source: gold_match_clearance_event
+    aggregation: count
+    filter: null
+    value_column: event_id
+    category: defensive
+
+  # --- Other actions ---
+  - id: touches_in_box
+    label: "Touches in box"
+    description: "Touches inside opponent penalty area"
+    source: gold_match_touch_in_box_event
+    aggregation: count
+    filter: null
+    value_column: event_id
+    category: finalization
+
+  - id: fouls_committed
+    label: "Fouls committed"
+    description: "Fouls committed by the player"
+    source: gold_match_infraction_event
+    aggregation: count
+    filter: "is_foul IS TRUE"
+    value_column: event_id
+    category: defensive
+
+categories:
+  defensive:
+    label: "Defensive"
+    color: "#3498db"
+  build_up:
+    label: "Build-up"
+    color: "#2ecc71"
+  finalization:
+    label: "Finalization"
+    color: "#e74c3c"

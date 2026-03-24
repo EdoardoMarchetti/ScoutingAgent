@@ -1,5 +1,7 @@
 import base64
+import json
 import re
+from pathlib import Path
 
 import streamlit as st
 
@@ -9,10 +11,14 @@ from langgraph_flow.my_scouting_report import (
     initial_scouting_state,
 )
 from services.match_repository import (
-    build_match_labels,
     build_player_labels,
-    get_available_matches,
+    distinct_areas,
+    distinct_competitions,
+    distinct_seasons,
+    get_available_matches_enriched,
     get_players_for_match,
+    match_select_label,
+    matches_after_filters,
 )
 from services.report_pdf import build_scouting_report_pdf
 
@@ -107,7 +113,15 @@ def _render_viz_block(block: dict, fallback_title: str) -> bool:
         _render_markdown_image(md_img)
     if desc:
         st.markdown(desc)
-    
+    if has_passes_table:
+        with st.expander("Passaggi — tabella eventi (stessi filtri del grafico)", expanded=False):
+            if len(passes_table) == 0:
+                st.caption(
+                    "Nessuna riga: filtri attivi = recipient/passer id ≠ 0 e solo compagni "
+                    "(team dominante su silver_match_event = team_id evento passaggio)."
+                )
+            else:
+                st.dataframe(passes_table, use_container_width=True, hide_index=True)
     return True
 
 st.title("Player Scouting")
@@ -115,21 +129,117 @@ st.write("Player scouting page.")
 
 st.markdown("### Match Selection")
 try:
-    available_matches = get_available_matches(limit=300)
+    available_matches = get_available_matches_enriched(limit=800)
 except Exception as exc:
     st.error(f"Unable to load matches from BigQuery: {exc}")
     available_matches = []
 
-match_labels = build_match_labels(available_matches)
-selected_match_id = st.selectbox(
-    "Available matches (from BigQuery)",
-    options=list(match_labels.keys()),
-    index=None,
-    placeholder="Select one match",
-    format_func=lambda match_id: match_labels[match_id],
+area_pairs = distinct_areas(available_matches)
+area_ids = [a[0] for a in area_pairs]
+area_labels = dict(area_pairs)
+
+col_area, col_comp, col_season = st.columns(3)
+with col_area:
+    if not area_ids:
+        st.selectbox("Area", options=["—"], disabled=True)
+        selected_area_id = None
+    else:
+        selected_area_id = st.selectbox(
+            "Area",
+            options=area_ids,
+            format_func=lambda i: area_labels[i],
+            index=None,
+            placeholder="Select area",
+            key="ps_filter_area",
+        )
+
+with col_comp:
+    comp_pairs = (
+        distinct_competitions(available_matches, int(selected_area_id))
+        if selected_area_id is not None
+        else []
+    )
+    comp_ids = [c[0] for c in comp_pairs]
+    comp_labels = dict(comp_pairs)
+    if selected_area_id is None or not comp_ids:
+        st.selectbox("Competition", options=["—"], disabled=True, key="ps_filter_comp_dis")
+        selected_competition_id = None
+    else:
+        selected_competition_id = st.selectbox(
+            "Competition",
+            options=comp_ids,
+            format_func=lambda i: comp_labels[i],
+            index=None,
+            placeholder="Select competition",
+            key="ps_filter_comp",
+        )
+
+with col_season:
+    season_pairs = (
+        distinct_seasons(
+            available_matches, int(selected_area_id), int(selected_competition_id)
+        )
+        if selected_area_id is not None and selected_competition_id is not None
+        else []
+    )
+    season_ids = [s[0] for s in season_pairs]
+    season_labels = dict(season_pairs)
+    if (
+        selected_area_id is None
+        or selected_competition_id is None
+        or not season_ids
+    ):
+        st.selectbox("Season", options=["—"], disabled=True, key="ps_filter_season_dis")
+        selected_season_id = None
+    else:
+        selected_season_id = st.selectbox(
+            "Season",
+            options=season_ids,
+            format_func=lambda i: season_labels[i],
+            index=None,
+            placeholder="Select season",
+            key="ps_filter_season",
+        )
+
+match_rows = (
+    matches_after_filters(
+        available_matches,
+        area_id=int(selected_area_id),
+        competition_id=int(selected_competition_id),
+        season_id=int(selected_season_id),
+    )
+    if (
+        selected_area_id is not None
+        and selected_competition_id is not None
+        and selected_season_id is not None
+    )
+    else []
 )
+match_by_id = {int(r["match_id"]): r for r in match_rows}
+match_id_options = list(match_by_id.keys())
+
 if not available_matches:
     st.info("No matches available in BigQuery for now.")
+elif (
+    selected_area_id is not None
+    and selected_competition_id is not None
+    and selected_season_id is not None
+    and not match_id_options
+):
+    st.warning("No matches for this area / competition / season.")
+
+if match_id_options:
+    selected_match_id = st.selectbox(
+        "Match",
+        options=match_id_options,
+        index=None,
+        placeholder="Select match",
+        format_func=lambda mid: match_select_label(match_by_id[mid]),
+        key="ps_filter_match",
+    )
+else:
+    st.selectbox("Match", options=["—"], disabled=True, key="ps_filter_match_empty")
+    selected_match_id = None
 
 if selected_match_id is not None:
     try:
@@ -227,31 +337,100 @@ if SESSION_RESULT_KEY in st.session_state and SESSION_CONTEXT_KEY in st.session_
     result = st.session_state[SESSION_RESULT_KEY]
     match_context = st.session_state[SESSION_CONTEXT_KEY]
 
-    try:
-        messages = result.get("messages") or []
-        report_text = str(getattr(messages[-1], "content", "") or "").strip() if messages else ""
-        stats_summary = str(result.get("statistical_summary") or "").strip()
-        pdf_bytes = build_scouting_report_pdf(
-            logo_path="images/sport_data_campus.png",
-            match_context=match_context,
-            report_text=report_text,
-            statistical_summary=stats_summary,
-            phase_viz=PHASE_VIZ,
-            result=result,
-        )
-        pdf_name = (
-            f"scouting-report-{match_context.get('player_name','player')}"
-            f"-{match_context.get('match_label','match')}.pdf"
-        ).replace(" ", "_").replace("/", "-")
-        st.download_button(
-            "Export PDF",
-            data=pdf_bytes,
-            file_name=pdf_name,
-            mime="application/pdf",
-            use_container_width=False,
-        )
-    except Exception as exc:
-        st.warning(f"PDF export unavailable: {exc}")
+    col_pdf, col_json = st.columns(2)
+    
+    # PDF Export
+    with col_pdf:
+        try:
+            messages = result.get("messages") or []
+            report_text = str(getattr(messages[-1], "content", "") or "").strip() if messages else ""
+            stats_summary = str(result.get("statistical_summary") or "").strip()
+            pdf_bytes = build_scouting_report_pdf(
+                logo_path="images/sport_data_campus.png",
+                match_context=match_context,
+                report_text=report_text,
+                statistical_summary=stats_summary,
+                phase_viz=PHASE_VIZ,
+                result=result,
+            )
+            pdf_name = (
+                f"scouting-report-{match_context.get('player_name','player')}"
+                f"-{match_context.get('match_label','match')}.pdf"
+            ).replace(" ", "_").replace("/", "-")
+            
+            # Save JSON alongside PDF for RAG
+            json_name = pdf_name.replace(".pdf", ".json")
+            reports_dir = Path("player_reports")
+            reports_dir.mkdir(exist_ok=True)
+            
+            # Build JSON export (full state minus binary/heavy data)
+            json_export = {
+                "match_id": st.session_state.get("ps_selected_match_id"),
+                "player_id": st.session_state.get("ps_selected_player_id"),
+                "match_header": match_context,
+                "scout": {"report_text": report_text},
+                "player_stats_summary": {"summary": stats_summary},
+                "possession_comments": {"comments": str(result.get("possession_comments") or "")},
+                "duels_visualizations": {
+                    "description": str(result.get("duels_visualizations", {}).get("description") or ""),
+                    "caption": str(result.get("duels_visualizations", {}).get("caption") or ""),
+                },
+                "recoveries_and_interceptions_visualization": {
+                    "description": str(result.get("recoveries_and_interceptions_visualization", {}).get("description") or ""),
+                    "caption": str(result.get("recoveries_and_interceptions_visualization", {}).get("caption") or ""),
+                },
+                "pass_sonar_visualization": {
+                    "description": str(result.get("pass_sonar_visualization", {}).get("description") or ""),
+                    "caption": str(result.get("pass_sonar_visualization", {}).get("caption") or ""),
+                },
+                "pass_start_network_visualization": {
+                    "description": str(result.get("pass_start_network_visualization", {}).get("description") or ""),
+                    "caption": str(result.get("pass_start_network_visualization", {}).get("caption") or ""),
+                },
+                "receiving_network_visualization": {
+                    "description": str(result.get("receiving_network_visualization", {}).get("description") or ""),
+                    "caption": str(result.get("receiving_network_visualization", {}).get("caption") or ""),
+                },
+                "shot_map_visualization": {
+                    "description": str(result.get("shot_map_visualization", {}).get("description") or ""),
+                    "caption": str(result.get("shot_map_visualization", {}).get("caption") or ""),
+                },
+                "crosses_map_visualization": {
+                    "description": str(result.get("crosses_map_visualization", {}).get("description") or ""),
+                    "caption": str(result.get("crosses_map_visualization", {}).get("caption") or ""),
+                },
+            }
+            
+            # Write JSON to disk
+            json_path = reports_dir / json_name
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(json_export, f, indent=2, ensure_ascii=False)
+            
+            st.download_button(
+                "📄 Export PDF",
+                data=pdf_bytes,
+                file_name=pdf_name,
+                mime="application/pdf",
+                use_container_width=True,
+            )
+            st.caption(f"✅ JSON saved to `{json_path}` for RAG")
+        except Exception as exc:
+            st.warning(f"PDF export unavailable: {exc}")
+    
+    # JSON Download Button
+    with col_json:
+        try:
+            json_export_data = json.dumps(json_export, indent=2, ensure_ascii=False)
+            st.download_button(
+                "📊 Download JSON",
+                data=json_export_data,
+                file_name=json_name,
+                mime="application/json",
+                use_container_width=True,
+            )
+            st.caption("For RAG and analysis")
+        except Exception:
+            pass
 
     try:
         st.markdown("### Match context from flow")
