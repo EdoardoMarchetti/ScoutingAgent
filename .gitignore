@@ -96,3 +96,4 @@ models/*.bin
 !.secrets/.gitkeep
 logs/runs
 logs/*.log
+.streamlit/*

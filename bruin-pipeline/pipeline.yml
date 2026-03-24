@@ -18,7 +18,7 @@ variables:
     default: "2025-07-01"
   match_to_date:
     type: string
-    default: "2026-06-31"
+    default: "2026-07-01"
   fixture_details:
     type: string
     default: "matches"

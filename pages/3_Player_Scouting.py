@@ -210,6 +210,7 @@ if generate_clicked:
             "competition_name": str(result.get("competition_name") or "").strip(),
             "player_name": str(result.get("player_name") or "").strip(),
             "team_name": str(result.get("team_name") or "").strip(),
+            "report_language": str(result.get("report_language") or report_language).strip(),
             "player_image_data_url": str(result.get("player_image_data_url") or "").strip(),
             "team_image_data_url": str(result.get("team_image_data_url") or "").strip(),
             "possession_comments_count": len(result.get("possession_comments") or []),

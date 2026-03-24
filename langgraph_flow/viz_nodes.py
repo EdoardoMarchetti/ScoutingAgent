@@ -39,6 +39,56 @@ from visualization.scouting_viz import (
 )
 
 
+def _lang(report_language: str) -> str:
+    l = (report_language or "English").strip().lower()
+    if l.startswith("it"):
+        return "it"
+    if l.startswith("es"):
+        return "es"
+    return "en"
+
+
+def _tr(report_language: str, key: str) -> str:
+    txt = {
+        "duels_caption": {
+            "en": "Defensive duel locations and outcomes across the pitch.",
+            "it": "Posizioni ed esiti dei duelli difensivi su tutto il campo.",
+            "es": "Ubicaciones y resultados de los duelos defensivos en todo el campo.",
+        },
+        "regains_caption": {
+            "en": "Ball regains by type, including counterpressing actions.",
+            "it": "Riconquiste palla per tipologia, incluse le azioni di contropressing.",
+            "es": "Recuperaciones de balón por tipo, incluyendo acciones de contrapresión.",
+        },
+        "pass_out_caption": {
+            "en": "Pass origin density and main passing links from the player.",
+            "it": "Densita delle origini dei passaggi e principali connessioni in uscita dal giocatore.",
+            "es": "Densidad de origen de pases y principales conexiones de pase del jugador.",
+        },
+        "pass_in_caption": {
+            "en": "Reception density and key teammates supplying passes.",
+            "it": "Densita delle ricezioni e compagni chiave che servono il giocatore.",
+            "es": "Densidad de recepciones y companeros clave que asisten al jugador.",
+        },
+        "touch_caption": {
+            "en": "On-ball touch density map showing involvement zones.",
+            "it": "Mappa di densita dei tocchi che mostra le zone di coinvolgimento.",
+            "es": "Mapa de densidad de contactos que muestra zonas de participacion.",
+        },
+        "shots_caption": {
+            "en": "Shot locations and chance quality profile in this match.",
+            "it": "Posizioni di tiro e profilo della qualita delle occasioni nel match.",
+            "es": "Ubicaciones de tiro y perfil de calidad de ocasiones en este partido.",
+        },
+        "crosses_caption": {
+            "en": "Cross and key-pass trajectories, including blocked deliveries.",
+            "it": "Traiettorie di cross e passaggi chiave, incluse le giocate bloccate.",
+            "es": "Trayectorias de centros y pases clave, incluyendo envios bloqueados.",
+        },
+    }
+    return txt[key][_lang(report_language)]
+
+
 def _enforce_output_language(prompt_text: str, language: str) -> str:
     lang = (language or "English").strip()
     return (
@@ -100,8 +150,8 @@ def node_defensive_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                     ),
                     report_language,
                 )
-                or "No defensive duels to display.",
-                "caption": "Defensive duel locations and outcomes across the pitch.",
+                or _tr(report_language, "duels_caption"),
+                "caption": _tr(report_language, "duels_caption"),
                 "events": [],
             }
         else:
@@ -129,7 +179,7 @@ def node_defensive_visualizations(state: ScoutingReportState) -> dict[str, Any]:
             duels_payload = {
                 "markdown_image": md,
                 "description": desc,
-                "caption": "Defensive duel locations and outcomes across the pitch.",
+                "caption": _tr(report_language, "duels_caption"),
                 "events": summary.get("sample_events", []),
             }
     except Exception as exc:
@@ -155,8 +205,8 @@ def node_defensive_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                     ),
                     report_language,
                 )
-                or "No recoveries or interceptions to display.",
-                "caption": "Ball regains by type, including counterpressing actions.",
+                or _tr(report_language, "regains_caption"),
+                "caption": _tr(report_language, "regains_caption"),
                 "events": [],
             }
         else:
@@ -184,7 +234,7 @@ def node_defensive_visualizations(state: ScoutingReportState) -> dict[str, Any]:
             rec_payload = {
                 "markdown_image": md,
                 "description": desc,
-                "caption": "Ball regains by type, including counterpressing actions.",
+                "caption": _tr(report_language, "regains_caption"),
                 "events": summary.get("sample_events", []),
             }
     except Exception as exc:
@@ -229,8 +279,8 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                     ),
                     report_language,
                 )
-                or "Insufficient pass data for this visualization.",
-                "caption": "Pass origin density and main passing links from the player.",
+                or _tr(report_language, "pass_out_caption"),
+                "caption": _tr(report_language, "pass_out_caption"),
                 "events": summary.get("sample_passes", []),
             }
         else:
@@ -259,7 +309,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
             out["pass_start_network_visualization"] = {
                 "markdown_image": md,
                 "description": desc,
-                "caption": "Pass origin density and main passing links from the player.",
+                "caption": _tr(report_language, "pass_out_caption"),
                 "events": summary.get("sample_passes", []),
             }
     except Exception as exc:
@@ -284,8 +334,8 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                     ),
                     report_language,
                 )
-                or "Insufficient reception data for this visualization.",
-                "caption": "Reception density and key teammates supplying passes.",
+                or _tr(report_language, "pass_in_caption"),
+                "caption": _tr(report_language, "pass_in_caption"),
                 "events": summary.get("sample_passes", []),
             }
         else:
@@ -314,7 +364,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
             out["receiving_network_visualization"] = {
                 "markdown_image": md,
                 "description": desc,
-                "caption": "Reception density and key teammates supplying passes.",
+                "caption": _tr(report_language, "pass_in_caption"),
                 "events": summary.get("sample_passes", []),
             }
     except Exception as exc:
@@ -340,8 +390,8 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                     ),
                     report_language,
                 )
-                or "Insufficient touch locations for KDE heatmap.",
-                "caption": "On-ball touch density map showing involvement zones.",
+                or _tr(report_language, "touch_caption"),
+                "caption": _tr(report_language, "touch_caption"),
                 "events": summary.get("sample_events", []),
             }
         else:
@@ -369,7 +419,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
             out["pass_sonar_visualization"] = {
                 "markdown_image": md,
                 "description": desc,
-                "caption": "On-ball touch density map showing involvement zones.",
+                "caption": _tr(report_language, "touch_caption"),
                 "events": summary.get("sample_events", []),
             }
     except Exception as exc:
@@ -417,8 +467,8 @@ def node_finalization_visualizations(state: ScoutingReportState) -> dict[str, An
                     ),
                     report_language,
                 )
-                or "No shots to display.",
-                "caption": "Shot locations and chance quality profile in this match.",
+                or _tr(report_language, "shots_caption"),
+                "caption": _tr(report_language, "shots_caption"),
                 "events": [],
             }
         else:
@@ -445,7 +495,7 @@ def node_finalization_visualizations(state: ScoutingReportState) -> dict[str, An
             out["shot_map_visualization"] = {
                 "markdown_image": md,
                 "description": desc,
-                "caption": "Shot locations and chance quality profile in this match.",
+                "caption": _tr(report_language, "shots_caption"),
                 "events": summary.get("sample_shots", []),
             }
     except Exception as exc:
@@ -476,8 +526,8 @@ def node_finalization_visualizations(state: ScoutingReportState) -> dict[str, An
                     ),
                     report_language,
                 )
-                or "No crosses or key passes to display.",
-                "caption": "Cross and key-pass trajectories, including blocked deliveries.",
+                or _tr(report_language, "crosses_caption"),
+                "caption": _tr(report_language, "crosses_caption"),
                 "events": [],
             }
         else:
@@ -504,7 +554,7 @@ def node_finalization_visualizations(state: ScoutingReportState) -> dict[str, An
             out["crosses_map_visualization"] = {
                 "markdown_image": md,
                 "description": desc,
-                "caption": "Cross and key-pass trajectories, including blocked deliveries.",
+                "caption": _tr(report_language, "crosses_caption"),
                 "events": summary.get("sample_events", []),
             }
     except Exception as exc:

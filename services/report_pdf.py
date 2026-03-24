@@ -9,6 +9,91 @@ from typing import Any
 import requests
 
 
+def _lang(report_language: str) -> str:
+    l = (report_language or "English").strip().lower()
+    if l.startswith("it"):
+        return "it"
+    if l.startswith("es"):
+        return "es"
+    return "en"
+
+
+def _t(report_language: str, key: str) -> str:
+    txt = {
+        "pdf_title": {"en": "Scouting report", "it": "Report scouting", "es": "Informe de scouting"},
+        "section_match_context": {"en": "Match context", "it": "Contesto partita", "es": "Contexto del partido"},
+        "section_scout_report": {"en": "Scouting report", "it": "Report scout", "es": "Reporte scout"},
+        "section_stats_report": {"en": "Statistical report", "it": "Report statistico", "es": "Reporte estadistico"},
+        "section_visualizations": {"en": "Visualizations", "it": "Visualizzazioni", "es": "Visualizaciones"},
+        "label_match": {"en": "Match", "it": "Partita", "es": "Partido"},
+        "label_competition": {"en": "Competition", "it": "Competizione", "es": "Competicion"},
+        "label_date": {"en": "Date", "it": "Data", "es": "Fecha"},
+        "label_player": {"en": "Player", "it": "Giocatore", "es": "Jugador"},
+        "label_team": {"en": "Team", "it": "Squadra", "es": "Equipo"},
+        "fallback_scout": {
+            "en": "No final report text available.",
+            "it": "Nessun testo finale del report disponibile.",
+            "es": "No hay texto final del reporte disponible.",
+        },
+        "fallback_stats": {
+            "en": "No statistical summary available.",
+            "it": "Nessun riepilogo statistico disponibile.",
+            "es": "No hay resumen estadistico disponible.",
+        },
+        "fallback_no_text": {
+            "en": "No textual description available.",
+            "it": "Nessuna descrizione testuale disponibile.",
+            "es": "No hay descripcion textual disponible.",
+        },
+        "fallback_no_image": {
+            "en": "No image available.",
+            "it": "Nessuna immagine disponibile.",
+            "es": "No hay imagen disponible.",
+        },
+        "phase_defensive": {"en": "Defensive phase", "it": "Fase difensiva", "es": "Fase defensiva"},
+        "phase_buildup": {"en": "Build-up phase", "it": "Fase di costruzione", "es": "Fase de construccion"},
+        "phase_finalization": {"en": "Finalization phase", "it": "Fase di finalizzazione", "es": "Fase de finalizacion"},
+        "viz_duels": {"en": "Duels", "it": "Duelli", "es": "Duelos"},
+        "viz_recoveries": {"en": "Recoveries & interceptions", "it": "Recuperi e intercetti", "es": "Recuperaciones e intercepciones"},
+        "viz_touch_density": {"en": "Touch density", "it": "Densita tocchi", "es": "Densidad de toques"},
+        "viz_pass_start": {"en": "Pass start + network", "it": "Origine passaggi + rete", "es": "Inicio de pases + red"},
+        "viz_receiving": {"en": "Receiving + network", "it": "Ricezioni + rete", "es": "Recepciones + red"},
+        "viz_shot_map": {"en": "Shot map", "it": "Mappa tiri", "es": "Mapa de tiros"},
+        "viz_crosses": {"en": "Crosses & key passes", "it": "Cross e passaggi chiave", "es": "Centros y pases clave"},
+    }
+    return txt.get(key, {}).get(_lang(report_language), txt.get(key, {}).get("en", key))
+
+
+def _localize_phase_name(report_language: str, phase_name: str) -> str:
+    p = (phase_name or "").strip().lower()
+    if "defensive" in p or "difens" in p or "defensiva" in p:
+        return _t(report_language, "phase_defensive")
+    if "build" in p or "costru" in p:
+        return _t(report_language, "phase_buildup")
+    if "final" in p or "offens" in p:
+        return _t(report_language, "phase_finalization")
+    return phase_name
+
+
+def _localize_viz_title(report_language: str, title: str) -> str:
+    x = (title or "").strip().lower()
+    if "duel" in x:
+        return _t(report_language, "viz_duels")
+    if "recover" in x or "intercept" in x:
+        return _t(report_language, "viz_recoveries")
+    if "touch density" in x:
+        return _t(report_language, "viz_touch_density")
+    if "pass start" in x:
+        return _t(report_language, "viz_pass_start")
+    if "receiving" in x:
+        return _t(report_language, "viz_receiving")
+    if "shot" in x:
+        return _t(report_language, "viz_shot_map")
+    if "cross" in x or "key pass" in x:
+        return _t(report_language, "viz_crosses")
+    return title
+
+
 def _require_reportlab():
     try:
         from reportlab.lib import colors
@@ -275,6 +360,7 @@ def build_scouting_report_pdf(
     bottom_reserved = 1.3 * cm
 
     buffer = io.BytesIO()
+    report_language = str(match_context.get("report_language") or "English")
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -282,7 +368,7 @@ def build_scouting_report_pdf(
         rightMargin=margin,
         topMargin=margin + top_reserved,
         bottomMargin=margin + bottom_reserved,
-        title="Scouting report",
+        title=_t(report_language, "pdf_title"),
     )
 
     logo_raw = None
@@ -294,7 +380,7 @@ def build_scouting_report_pdf(
     team_raw = _load_image_bytes(str(match_context.get("team_image_data_url") or ""))
 
     footer_text = (
-        f"Scouting report - {match_context.get('match_label', '')} - "
+        f"{_t(report_language, 'pdf_title')} - {match_context.get('match_label', '')} - "
         f"{match_context.get('player_name', '')}"
     )
 
@@ -351,13 +437,13 @@ def build_scouting_report_pdf(
     story: list[Any] = []
 
     # Match context
-    story.append(Paragraph("Match context", h2))
+    story.append(Paragraph(_t(report_language, "section_match_context"), h2))
     info_html = (
-        f"<b>Match:</b> {match_context.get('match_label', '')}<br/>"
-        f"<b>Competition:</b> {match_context.get('competition_name', '')}<br/>"
-        f"<b>Date:</b> {match_context.get('match_date', '')}<br/>"
-        f"<b>Player:</b> {match_context.get('player_name', '')}<br/>"
-        f"<b>Team:</b> {match_context.get('team_name', '')}"
+        f"<b>{_t(report_language, 'label_match')}:</b> {match_context.get('match_label', '')}<br/>"
+        f"<b>{_t(report_language, 'label_competition')}:</b> {match_context.get('competition_name', '')}<br/>"
+        f"<b>{_t(report_language, 'label_date')}:</b> {match_context.get('match_date', '')}<br/>"
+        f"<b>{_t(report_language, 'label_player')}:</b> {match_context.get('player_name', '')}<br/>"
+        f"<b>{_t(report_language, 'label_team')}:</b> {match_context.get('team_name', '')}"
     )
     context_cells: list[Any] = [Paragraph(info_html, body)]
     context_cells.append(
@@ -378,8 +464,8 @@ def build_scouting_report_pdf(
     story.extend([ctbl, Spacer(1, 0.3 * cm)])
 
     # Scout report
-    story.append(Paragraph("Report scout", h2))
-    scout_text = report_text or "No final report text available."
+    story.append(Paragraph(_t(report_language, "section_scout_report"), h2))
+    scout_text = report_text or _t(report_language, "fallback_scout")
     _append_markdown_text(
         story=story,
         text=scout_text,
@@ -392,8 +478,8 @@ def build_scouting_report_pdf(
 
     # Statistical report (new page)
     story.append(PageBreak())
-    story.append(Paragraph("Report statistico", h2))
-    stats_text = statistical_summary or "No statistical summary available."
+    story.append(Paragraph(_t(report_language, "section_stats_report"), h2))
+    stats_text = statistical_summary or _t(report_language, "fallback_stats")
     _append_markdown_text(
         story=story,
         text=stats_text,
@@ -406,9 +492,9 @@ def build_scouting_report_pdf(
 
     # Visualizations (new page)
     story.append(PageBreak())
-    story.append(Paragraph("Visualizzazioni", h2))
+    story.append(Paragraph(_t(report_language, "section_visualizations"), h2))
     for phase_name, viz_items in phase_viz:
-        phase_header = Paragraph(phase_name, h3)
+        phase_header = Paragraph(_localize_phase_name(report_language, phase_name), h3)
         row_blocks: list[Any] = []
         for state_key, title in viz_items:
             block = result.get(state_key) if isinstance(result.get(state_key), dict) else {}
@@ -422,7 +508,8 @@ def build_scouting_report_pdf(
             desc_short = _clean_markdown_for_pdf(desc)
             if len(desc_short) > 1100:
                 desc_short = desc_short[:1100].rstrip() + "..."
-            left_parts: list[Any] = [Paragraph(f"<b>{title}</b>", body_compact)]
+            local_title = _localize_viz_title(report_language, title)
+            left_parts: list[Any] = [Paragraph(f"<b>{local_title}</b>", body_compact)]
             if cap and cap != title:
                 left_parts.append(Paragraph(cap, caption))
             if desc_short:
@@ -431,7 +518,7 @@ def build_scouting_report_pdf(
             elif err:
                 left_parts.append(Paragraph(f"<i>{err}</i>", caption))
             else:
-                left_parts.append(Paragraph("No textual description available.", caption))
+                left_parts.append(Paragraph(_t(report_language, "fallback_no_text"), caption))
             left_tbl = Table([[p] for p in left_parts], colWidths=[doc.width * 0.6 - 0.2 * cm])
             left_tbl.setStyle(
                 TableStyle(
@@ -449,7 +536,7 @@ def build_scouting_report_pdf(
             if raw_img:
                 right_obj = _img_flowable(raw_img, doc.width * 0.4 - 0.2 * cm, 7.0 * cm, R)
             else:
-                right_obj = Paragraph("No image available.", caption)
+                right_obj = Paragraph(_t(report_language, "fallback_no_image"), caption)
 
             viz_tbl = Table(
                 [[left_tbl, right_obj]],

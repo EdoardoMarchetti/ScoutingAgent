@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -10,18 +9,24 @@ from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 
 from services.bigquery_client import get_bq_project_id
+from services.runtime_secrets import (
+    get_secret,
+    get_secret_value,
+    parse_service_account_info,
+)
 
 _SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 _API_BASE = "https://geminidataanalytics.googleapis.com/v1alpha"
 
 
 def _get_access_token() -> str:
-    raw = os.getenv("DATA_AGENT_CREDENTIALS", "").strip()
-    if not raw:
+    credentials_value = get_secret_value("DATA_AGENT_CREDENTIALS", "")
+    if not credentials_value:
         raise RuntimeError("Missing DATA_AGENT_CREDENTIALS in environment.")
 
+    raw = str(credentials_value).strip()
     if raw.startswith("{"):
-        info = json.loads(raw)
+        info = parse_service_account_info(credentials_value)
         creds = service_account.Credentials.from_service_account_info(info, scopes=[_SCOPE])
     else:
         credentials_path = Path(raw).expanduser()
@@ -170,8 +175,8 @@ def query_data_agent(user_message: str, use_conversation_context: bool = False) 
     del use_conversation_context  # Reserved for future multi-turn support.
 
     project_id = get_bq_project_id()
-    location = (os.getenv("DATA_AGENT_LOCATION") or "").strip()
-    agent_id = (os.getenv("SCOUTING_AGENT_ID") or "").strip()
+    location = get_secret("DATA_AGENT_LOCATION", "").strip()
+    agent_id = get_secret("SCOUTING_AGENT_ID", "").strip()
     if not location:
         raise RuntimeError("Missing DATA_AGENT_LOCATION in environment.")
     if not agent_id:
