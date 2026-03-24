@@ -7,7 +7,7 @@ from google.cloud import bigquery
 from services.bigquery_client import get_bigquery_client, get_bq_project_id
 
 
-def get_match_player_header(match_id: int, player_id: int) -> dict[str, str]:
+def get_match_player_header(match_id: int, player_id: int) -> dict[str, Any]:
     project = get_bq_project_id()
     client = get_bigquery_client()
 
@@ -17,8 +17,10 @@ def get_match_player_header(match_id: int, player_id: int) -> dict[str, str]:
           CAST(m.match_date_utc AS STRING) AS match_date,
           comp.name AS competition_name,
           home.name AS home_team_name,
+          home.image_data_url AS home_team_image_data_url,
           away.name AS away_team_name,
           p.player_id,
+          p.image_data_url AS player_image_data_url,
           COALESCE(
             NULLIF(TRIM(p.short_name), ''),
             NULLIF(TRIM(CONCAT(COALESCE(p.first_name, ''), ' ', COALESCE(p.last_name, ''))), '')
@@ -49,6 +51,8 @@ def get_match_player_header(match_id: int, player_id: int) -> dict[str, str]:
             "competition_name": "Unknown",
             "player_name": f"Player {player_id}",
             "team_name": "Unknown",
+            "team_image_data_url": None,
+            "player_image_data_url": None,
         }
 
     row = dict(rows[0].items())
@@ -60,6 +64,16 @@ def get_match_player_header(match_id: int, player_id: int) -> dict[str, str]:
         "competition_name": (row.get("competition_name") or "Unknown").strip(),
         "player_name": (row.get("player_name") or f"Player {player_id}").strip(),
         "team_name": home,
+        "team_image_data_url": (
+            str(row.get("home_team_image_data_url")).strip()
+            if row.get("home_team_image_data_url")
+            else None
+        ),
+        "player_image_data_url": (
+            str(row.get("player_image_data_url")).strip()
+            if row.get("player_image_data_url")
+            else None
+        ),
     }
 
 

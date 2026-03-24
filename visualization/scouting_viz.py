@@ -25,7 +25,7 @@ from matplotlib import cm
 from matplotlib.axes import Axes
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.contour import QuadContourSet
-from mplsoccer import VerticalPitch
+from mplsoccer import FontManager, VerticalPitch
 from PIL import Image
 
 # --- Brand colormaps ----------------------------------------------------------
@@ -41,6 +41,23 @@ SDC_CMAP_WHITE0 = LinearSegmentedColormap.from_list(
     N=256,
 )
 
+_ROBOTO_REGULAR_URL = (
+    "https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf"
+)
+_ROBOTO_SLAB_URL = (
+    "https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf"
+)
+
+try:
+    FONT_NORMAL = FontManager(_ROBOTO_REGULAR_URL)
+except Exception:
+    FONT_NORMAL = None
+
+try:
+    FONT_BOLD = FontManager(_ROBOTO_SLAB_URL)
+except Exception:
+    FONT_BOLD = None
+
 # --- Pass-link viz (shared out / in) -----------------------------------------
 
 PASS_VIZ_STAR_SIZE = 200
@@ -48,6 +65,8 @@ PASS_VIZ_NODE_SIZE = 200
 PASS_VIZ_COUNT_FONTSIZE = 8
 PASS_VIZ_MARKERS = ["o", "s", "D", "^", "v"]
 PASS_VIZ_COLORS = ["#059669", "#1d4ed8", "#7c3aed", "#db2777", "#ea580c"]
+PITCH_LINE_SOFT = "#A8A9AD"
+PITCH_LINEWIDTH_SOFT = 1.6
 
 
 def _img_from_any(source: str | None) -> np.ndarray | None:
@@ -72,6 +91,7 @@ def add_header_branding(
     fig: plt.Figure,
     title: str,
     *,
+    subtitle: str | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
     player_img_source: str | None = None,
@@ -84,16 +104,32 @@ def add_header_branding(
     right_w_double: float = 0.07,
 ) -> None:
     fig.subplots_adjust(top=0.84)
+    has_subtitle = bool((subtitle or "").strip())
+    title_y = header_center_y + (0.013 if has_subtitle else 0.0)
     fig.text(
         0.5,
-        header_center_y,
+        title_y,
         title,
         ha="center",
         va="center",
         fontsize=28,
         fontweight="bold",
         color="#A8A9AD",
+        fontproperties=(FONT_BOLD.prop if FONT_BOLD is not None else None),
     )
+    if has_subtitle:
+        fig.text(
+            0.5,
+            header_center_y - 0.028,
+            str(subtitle).strip(),
+            ha="center",
+            va="center",
+            fontsize=16,
+            fontweight="normal",
+            color="#A8A9AD",
+            alpha=0.9,
+            fontproperties=(FONT_NORMAL.prop if FONT_NORMAL is not None else None),
+        )
 
     def _axes_centered(x0: float, w: float, h: float) -> plt.Axes:
         bottom = header_center_y - h / 2
@@ -125,19 +161,6 @@ def add_header_branding(
         ax_t.axis("off")
 
 
-def _kde_mappable(ax: plt.Axes, cmap: Any, kde_return: Any) -> Any:
-    if kde_return is not None and not isinstance(kde_return, Axes):
-        if hasattr(kde_return, "cmap") and kde_return.cmap is not None:
-            return kde_return
-    for ch in ax.get_children():
-        if isinstance(ch, QuadContourSet) and ch.cmap is not None:
-            return ch
-    for coll in reversed(ax.collections):
-        if getattr(coll, "cmap", None) is not None:
-            return coll
-    sm = cm.ScalarMappable(norm=Normalize(0, 1), cmap=cmap)
-    sm.set_array(np.array([0, 1]))
-    return sm
 
 
 def _pitch_link_line(
@@ -506,26 +529,6 @@ def fetch_match_regains(
 
 # --- Duel / regain pitch helpers ----------------------------------------------
 
-def _draw_attack_arrow(pitch: VerticalPitch, ax: plt.Axes) -> None:
-    ax.annotate(
-        "",
-        xy=(50, 93),
-        xytext=(50, 76),
-        arrowprops=dict(arrowstyle="-|>", lw=2.0, color="#000009", mutation_scale=15),
-        zorder=40,
-    )
-    pitch.text(
-        50,
-        95.5,
-        "ATTACK",
-        ax=ax,
-        ha="center",
-        va="bottom",
-        fontsize=10,
-        color="#000009",
-        weight="bold",
-        zorder=40,
-    )
 
 
 def _event_pitch_draw(
@@ -542,7 +545,8 @@ def _event_pitch_draw(
         goal_type="box",
         goal_alpha=0.8,
         pitch_color="white",
-        line_color="#000009",
+        line_color=PITCH_LINE_SOFT,
+        linewidth=PITCH_LINEWIDTH_SOFT,
         line_zorder=4,
     )
     fig, ax = pitch.draw(figsize=figsize)
@@ -599,6 +603,7 @@ def plot_shot_map_vertical(
     df_shots: pd.DataFrame,
     title: str,
     *,
+    subtitle: str | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
     player_img_source: str | None = None,
@@ -648,6 +653,7 @@ def plot_shot_map_vertical(
         branding_header(
             fig,
             title=title,
+            subtitle=subtitle,
             left_logo_path=left_logo_path,
             team_img_source=team_img_source,
             player_img_source=player_img_source,
@@ -656,6 +662,7 @@ def plot_shot_map_vertical(
         add_header_branding(
             fig,
             title=title,
+            subtitle=subtitle,
             left_logo_path=left_logo_path,
             team_img_source=team_img_source,
             player_img_source=player_img_source,
@@ -668,6 +675,7 @@ def plot_cross_key_pass_map_vertical(
     df_cross: pd.DataFrame,
     title: str,
     *,
+    subtitle: str | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
     player_img_source: str | None = None,
@@ -696,6 +704,7 @@ def plot_cross_key_pass_map_vertical(
     add_header_branding(
         fig,
         title=title,
+        subtitle=subtitle,
         left_logo_path=left_logo_path,
         team_img_source=team_img_source,
         player_img_source=player_img_source,
@@ -777,13 +786,14 @@ def plot_player_touch_kde_vertical(
     df_events: pd.DataFrame,
     title: str,
     *,
+    subtitle: str | None = None,
     branding_header: Callable[..., None] | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
     player_img_source: str | None = None,
     x_col: str = "location_x",
     y_col: str = "location_y",
-    figsize: tuple[float, float] = (5.2, 6.8),
+    figsize: tuple[float, float] = (6.0, 8.0),
     cmap: Any | None = None,
     pitch_half: bool = False,
     fill: bool = True,
@@ -792,6 +802,7 @@ def plot_player_touch_kde_vertical(
     cut: int = 4,
     colorbar: bool = True,
     cbar_label: str = "Density (KDE)",
+    header_center_y: float = 1.03,
 ) -> tuple[plt.Figure, plt.Axes]:
     if cmap is None:
         cmap = SDC_CMAP
@@ -810,19 +821,32 @@ def plot_player_touch_kde_vertical(
         goal_type="box",
         goal_alpha=0.8,
         pitch_color="white",
-        line_color="#000009",
+        line_color=PITCH_LINE_SOFT,
+        linewidth=PITCH_LINEWIDTH_SOFT,
         line_zorder=3,
     )
     fig, ax = pitch.draw(figsize=figsize)
     fig.patch.set_facecolor("white")
     hdr = branding_header or add_header_branding
-    hdr(
-        fig,
-        title=title,
-        left_logo_path=left_logo_path,
-        team_img_source=team_img_source,
-        player_img_source=player_img_source,
-    )
+    try:
+        hdr(
+            fig,
+            title=title,
+            subtitle=subtitle,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
+    except TypeError:
+        hdr(
+            fig,
+            title=title,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
     kde_return = pitch.kdeplot(
         d[x_col],
         d[y_col],
@@ -835,11 +859,7 @@ def plot_player_touch_kde_vertical(
         zorder=1,
         alpha=0.92,
     )
-    if colorbar:
-        mappable = _kde_mappable(ax, cmap, kde_return)
-        cbar = fig.colorbar(mappable, ax=ax, shrink=0.72, pad=0.04, location="right")
-        cbar.set_label(cbar_label, color="#333333", fontsize=10)
-        cbar.ax.tick_params(colors="#333333", labelsize=9)
+    
     return fig, ax
 
 
@@ -847,6 +867,7 @@ def plot_pass_link_out_kde_vertical(
     df_passes: pd.DataFrame,
     title: str,
     *,
+    subtitle: str | None = None,
     branding_header: Callable[..., None] | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
@@ -861,7 +882,7 @@ def plot_pass_link_out_kde_vertical(
     kde_bw_adjust: float = 1.5,
     kde_alpha: float = 0.5,
     show_kde_colorbar: bool = False,
-    header_center_y: float = 0.93,
+    header_center_y: float = 1.03,
 ) -> tuple[plt.Figure, plt.Axes]:
     d = df_passes.copy()
     for c in ["start_x", "start_y", "end_x", "end_y"]:
@@ -894,7 +915,8 @@ def plot_pass_link_out_kde_vertical(
         goal_type="box",
         goal_alpha=0.8,
         pitch_color="white",
-        line_color="#000009",
+        line_color=PITCH_LINE_SOFT,
+        linewidth=PITCH_LINEWIDTH_SOFT,
         line_zorder=4,
     )
     fig, ax = pitch.draw(figsize=figsize)
@@ -918,9 +940,7 @@ def plot_pass_link_out_kde_vertical(
     for coll in ax.collections:
         if coll.get_zorder() < 10:
             coll.set_zorder(2)
-    if show_kde_colorbar:
-        m = _kde_mappable(ax, cmap_kde, kde_ret)
-        fig.colorbar(m, ax=ax, shrink=0.5, pad=0.02).set_label("Start density", fontsize=9)
+    
     pitch.scatter(
         sx,
         sy,
@@ -971,7 +991,7 @@ def plot_pass_link_out_kde_vertical(
     leg = ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.07),
-        ncol=min(2, top_k + 1),
+        ncol=min(3, top_k + 1),
         frameon=True,
         fancybox=True,
         framealpha=0.96,
@@ -982,14 +1002,25 @@ def plot_pass_link_out_kde_vertical(
     for t in leg.get_texts():
         t.set_color("#222222")
     hdr = branding_header or add_header_branding
-    hdr(
-        fig,
-        title=title,
-        left_logo_path=left_logo_path,
-        team_img_source=team_img_source,
-        player_img_source=player_img_source,
-        header_center_y=header_center_y,
-    )
+    try:
+        hdr(
+            fig,
+            title=title,
+            subtitle=subtitle,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
+    except TypeError:
+        hdr(
+            fig,
+            title=title,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
     return fig, ax
 
 
@@ -997,6 +1028,7 @@ def plot_pass_link_in_kde_vertical(
     df_passes: pd.DataFrame,
     title: str,
     *,
+    subtitle: str | None = None,
     branding_header: Callable[..., None] | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
@@ -1011,7 +1043,7 @@ def plot_pass_link_in_kde_vertical(
     kde_bw_adjust: float = 1.5,
     kde_alpha: float = 0.5,
     show_kde_colorbar: bool = False,
-    header_center_y: float = 0.93,
+    header_center_y: float = 1.03,
     converge_lines_to_target: bool = True,
 ) -> tuple[plt.Figure, plt.Axes]:
     d = df_passes.copy()
@@ -1050,7 +1082,8 @@ def plot_pass_link_in_kde_vertical(
         goal_type="box",
         goal_alpha=0.8,
         pitch_color="white",
-        line_color="#000009",
+        line_color=PITCH_LINE_SOFT,
+        linewidth=PITCH_LINEWIDTH_SOFT,
         line_zorder=4,
     )
     fig, ax = pitch.draw(figsize=figsize)
@@ -1074,9 +1107,7 @@ def plot_pass_link_in_kde_vertical(
     for coll in ax.collections:
         if coll.get_zorder() < 10:
             coll.set_zorder(2)
-    if show_kde_colorbar:
-        m = _kde_mappable(ax, cmap_kde, kde_ret)
-        fig.colorbar(m, ax=ax, shrink=0.5, pad=0.02).set_label("Reception density", fontsize=9)
+    
     pitch.scatter(
         tx,
         ty,
@@ -1129,7 +1160,7 @@ def plot_pass_link_in_kde_vertical(
     leg = ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.07),
-        ncol=min(2, top_k + 1),
+        ncol=min(3, top_k + 1),
         frameon=True,
         fancybox=True,
         framealpha=0.96,
@@ -1140,14 +1171,25 @@ def plot_pass_link_in_kde_vertical(
     for t in leg.get_texts():
         t.set_color("#222222")
     hdr = branding_header or add_header_branding
-    hdr(
-        fig,
-        title=title,
-        left_logo_path=left_logo_path,
-        team_img_source=team_img_source,
-        player_img_source=player_img_source,
-        header_center_y=header_center_y,
-    )
+    try:
+        hdr(
+            fig,
+            title=title,
+            subtitle=subtitle,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
+    except TypeError:
+        hdr(
+            fig,
+            title=title,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
     return fig, ax
 
 
@@ -1155,13 +1197,14 @@ def plot_defensive_duel_map_vertical(
     df_duels: pd.DataFrame,
     title: str,
     *,
+    subtitle: str | None = None,
     branding_header: Callable[..., None] | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
     player_img_source: str | None = None,
     pitch_half: bool = False,
     figsize: tuple[float, float] = (6.0, 8.0),
-    header_center_y: float = 0.93,
+    header_center_y: float = 1.03,
     scatter_size: int = 120,
     won_color: str = "#16a34a",
     lost_color: str = "#dc2626",
@@ -1174,7 +1217,7 @@ def plot_defensive_duel_map_vertical(
     if d.empty:
         raise ValueError("No duels with valid coordinates.")
     fig, ax, pitch = _event_pitch_draw(pitch_half=pitch_half, figsize=figsize)
-    _draw_attack_arrow(pitch, ax)
+    
 
     def _to_won(x: Any) -> object:
         if x is None or pd.isna(x):
@@ -1227,7 +1270,7 @@ def plot_defensive_duel_map_vertical(
     leg = ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.08),
-        ncol=2,
+        ncol=3,
         frameon=True,
         fancybox=True,
         framealpha=0.96,
@@ -1238,14 +1281,25 @@ def plot_defensive_duel_map_vertical(
     for t in leg.get_texts():
         t.set_color("#222222")
     hdr = branding_header or add_header_branding
-    hdr(
-        fig,
-        title=title,
-        left_logo_path=left_logo_path,
-        team_img_source=team_img_source,
-        player_img_source=player_img_source,
-        header_center_y=header_center_y,
-    )
+    try:
+        hdr(
+            fig,
+            title=title,
+            subtitle=subtitle,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
+    except TypeError:
+        hdr(
+            fig,
+            title=title,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
     return fig, ax
 
 
@@ -1253,13 +1307,14 @@ def plot_regain_map_vertical(
     df_events: pd.DataFrame,
     title: str,
     *,
+    subtitle: str | None = None,
     branding_header: Callable[..., None] | None = None,
     left_logo_path: str = "images/sport_data_campus.png",
     team_img_source: str | None = None,
     player_img_source: str | None = None,
     pitch_half: bool = False,
     figsize: tuple[float, float] = (6.0, 8.0),
-    header_center_y: float = 0.93,
+    header_center_y: float = 1.03,
     scatter_size: int = 130,
     counterpress_edge: str = "#ca8a04",
     counterpress_lw: float = 2.2,
@@ -1280,7 +1335,6 @@ def plot_regain_map_vertical(
         else False
     )
     fig, ax, pitch = _event_pitch_draw(pitch_half=pitch_half, figsize=figsize)
-    _draw_attack_arrow(pitch, ax)
     used_labels: set[str] = set()
     for kind, g in d.groupby("_kind"):
         mk, fc = RECOVERY_KIND_STYLE.get(kind, ("o", "#374151"))
@@ -1309,7 +1363,7 @@ def plot_regain_map_vertical(
     leg = ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.08),
-        ncol=2,
+        ncol=3,
         frameon=True,
         fancybox=True,
         framealpha=0.96,
@@ -1320,14 +1374,25 @@ def plot_regain_map_vertical(
     for t in leg.get_texts():
         t.set_color("#222222")
     hdr = branding_header or add_header_branding
-    hdr(
-        fig,
-        title=title,
-        left_logo_path=left_logo_path,
-        team_img_source=team_img_source,
-        player_img_source=player_img_source,
-        header_center_y=header_center_y,
-    )
+    try:
+        hdr(
+            fig,
+            title=title,
+            subtitle=subtitle,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
+    except TypeError:
+        hdr(
+            fig,
+            title=title,
+            left_logo_path=left_logo_path,
+            team_img_source=team_img_source,
+            player_img_source=player_img_source,
+            header_center_y=header_center_y,
+        )
     return fig, ax
 
 
