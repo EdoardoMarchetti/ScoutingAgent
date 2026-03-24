@@ -51,6 +51,13 @@ def df_sample_records(df: pd.DataFrame, n: int = 30, cols: list[str] | None = No
     return d.to_dict(orient="records")
 
 
+def passes_table_records(df: pd.DataFrame, *, max_rows: int = 800) -> list[dict[str, Any]]:
+    """JSON-safe rows for Streamlit / session state (no numpy scalars)."""
+    if df.empty:
+        return []
+    return json.loads(df.head(int(max_rows)).to_json(orient="records", date_format="iso"))
+
+
 def pitch_zone_label_from_xy(x: Any, y: Any) -> str | None:
     """3x3 juego de posicion label from Wyscout x/y in possessing-team frame."""
     try:

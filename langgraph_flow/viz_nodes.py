@@ -9,6 +9,7 @@ from langgraph_flow.viz_helpers import (
     branding_logo_path,
     build_viz_description_prompt,
     fig_to_markdown_png,
+    passes_table_records,
     structured_json_for_llm,
     summarize_crosses_df,
     summarize_duels_df,
@@ -265,6 +266,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
         df_out = fetch_match_passes_from_player(match_id, player_id, project_id=project_id, limit=25_000)
         summary = summarize_passes_out_df(df_out)
         structured = structured_json_for_llm(summary)
+        passes_out_table = passes_table_records(df_out)
         if len(df_out.dropna(subset=["start_x", "start_y", "end_x", "end_y"])) < 3:
             out["pass_start_network_visualization"] = {
                 "markdown_image": "",
@@ -282,6 +284,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                 or _tr(report_language, "pass_out_caption"),
                 "caption": _tr(report_language, "pass_out_caption"),
                 "events": summary.get("sample_passes", []),
+                "passes_table": passes_out_table,
             }
         else:
             fig, _ = plot_pass_link_out_kde_vertical(
@@ -311,6 +314,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                 "description": desc,
                 "caption": _tr(report_language, "pass_out_caption"),
                 "events": summary.get("sample_passes", []),
+                "passes_table": passes_out_table,
             }
     except Exception as exc:
         out["pass_start_network_visualization"] = _empty_viz(str(exc))
@@ -320,6 +324,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
         df_in = fetch_match_passes_to_player(match_id, player_id, project_id=project_id, limit=25_000)
         summary = summarize_passes_in_df(df_in)
         structured = structured_json_for_llm(summary)
+        passes_in_table = passes_table_records(df_in)
         if len(df_in.dropna(subset=["start_x", "start_y", "end_x", "end_y"])) < 3:
             out["receiving_network_visualization"] = {
                 "markdown_image": "",
@@ -337,6 +342,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                 or _tr(report_language, "pass_in_caption"),
                 "caption": _tr(report_language, "pass_in_caption"),
                 "events": summary.get("sample_passes", []),
+                "passes_table": passes_in_table,
             }
         else:
             fig, _ = plot_pass_link_in_kde_vertical(
@@ -366,6 +372,7 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                 "description": desc,
                 "caption": _tr(report_language, "pass_in_caption"),
                 "events": summary.get("sample_passes", []),
+                "passes_table": passes_in_table,
             }
     except Exception as exc:
         out["receiving_network_visualization"] = _empty_viz(str(exc))

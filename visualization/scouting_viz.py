@@ -292,23 +292,52 @@ def fetch_match_passes_from_player(
     dataset: str = "scouting_agent",
     limit: int = 50000,
 ) -> pd.DataFrame:
-    """Passes made by player_id with recipient + coordinates."""
+    """Passes made by player_id with recipient + coordinates.
+
+    Excludes Wyscout placeholder recipient id 0 and non-teammate recipients
+    (dominant match team from silver_match_event must match pass event team_id).
+    """
     pid = _bq_project_id(project_id)
     lim = max(1, min(int(limit), 100_000))
     fq = _table_fq(pid, dataset, "gold_match_pass_event")
+    se = _table_fq(pid, dataset, "silver_match_event")
     dp = _table_fq(pid, dataset, "dim_player")
     sql = f"""
+    WITH player_team_votes AS (
+      SELECT
+        s.match_id,
+        s.player_id,
+        s.team_id,
+        COUNT(*) AS c
+      FROM {se} AS s
+      WHERE s.match_id = @match_id
+        AND s.player_id IS NOT NULL AND s.player_id != 0
+        AND s.team_id IS NOT NULL
+      GROUP BY s.match_id, s.player_id, s.team_id
+    ),
+    player_dominant_team AS (
+      SELECT match_id, player_id, team_id AS dominant_team_id
+      FROM player_team_votes
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY match_id, player_id ORDER BY c DESC, team_id
+      ) = 1
+    )
     SELECT p.match_id, p.event_id, p.minute, p.second,
       p.location_x AS start_x, p.location_y AS start_y,
       p.pass_end_x AS end_x, p.pass_end_y AS end_y,
       p.player_id AS passer_id, pas.short_name AS passer_name,
-      p.recipient_player_id AS recipient_id, rec.short_name AS recipient_name
+      p.recipient_player_id AS recipient_id, rec.short_name AS recipient_name,
+      p.team_id AS passer_team_id
     FROM {fq} AS p
     LEFT JOIN {dp} AS pas ON p.player_id = pas.player_id
     LEFT JOIN {dp} AS rec ON p.recipient_player_id = rec.player_id
+    INNER JOIN player_dominant_team AS rdt
+      ON rdt.match_id = p.match_id AND rdt.player_id = p.recipient_player_id
     WHERE p.match_id = @match_id AND p.player_id = @player_id
-      AND p.recipient_player_id IS NOT NULL
+      AND p.recipient_player_id IS NOT NULL AND p.recipient_player_id != 0
       AND p.pass_end_x IS NOT NULL AND p.pass_end_y IS NOT NULL
+      AND p.team_id IS NOT NULL
+      AND rdt.dominant_team_id = p.team_id
     ORDER BY p.minute, p.second, p.event_id LIMIT @limit
     """
     cfg = bigquery.QueryJobConfig(
@@ -329,23 +358,52 @@ def fetch_match_passes_to_player(
     dataset: str = "scouting_agent",
     limit: int = 50000,
 ) -> pd.DataFrame:
-    """Passes received by target_player_id (recipient)."""
+    """Passes received by target_player_id (recipient).
+
+    Excludes passer id 0 and passes where the passer is not on the same match
+    team as the recipient (teammate passes only).
+    """
     pid = _bq_project_id(project_id)
     lim = max(1, min(int(limit), 100_000))
     fq = _table_fq(pid, dataset, "gold_match_pass_event")
+    se = _table_fq(pid, dataset, "silver_match_event")
     dp = _table_fq(pid, dataset, "dim_player")
     sql = f"""
+    WITH player_team_votes AS (
+      SELECT
+        s.match_id,
+        s.player_id,
+        s.team_id,
+        COUNT(*) AS c
+      FROM {se} AS s
+      WHERE s.match_id = @match_id
+        AND s.player_id IS NOT NULL AND s.player_id != 0
+        AND s.team_id IS NOT NULL
+      GROUP BY s.match_id, s.player_id, s.team_id
+    ),
+    player_dominant_team AS (
+      SELECT match_id, player_id, team_id AS dominant_team_id
+      FROM player_team_votes
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY match_id, player_id ORDER BY c DESC, team_id
+      ) = 1
+    )
     SELECT p.match_id, p.event_id, p.minute, p.second,
       p.location_x AS start_x, p.location_y AS start_y,
       p.pass_end_x AS end_x, p.pass_end_y AS end_y,
       p.player_id AS passer_id, pas.short_name AS passer_name,
-      p.recipient_player_id AS target_id, tar.short_name AS target_name
+      p.recipient_player_id AS target_id, tar.short_name AS target_name,
+      p.team_id AS passer_team_id
     FROM {fq} AS p
     LEFT JOIN {dp} AS pas ON p.player_id = pas.player_id
     LEFT JOIN {dp} AS tar ON p.recipient_player_id = tar.player_id
+    INNER JOIN player_dominant_team AS fdt
+      ON fdt.match_id = p.match_id AND fdt.player_id = @target_player_id
     WHERE p.match_id = @match_id AND p.recipient_player_id = @target_player_id
-      AND p.player_id IS NOT NULL
+      AND p.player_id IS NOT NULL AND p.player_id != 0
       AND p.pass_end_x IS NOT NULL AND p.pass_end_y IS NOT NULL
+      AND p.team_id IS NOT NULL
+      AND p.team_id = fdt.dominant_team_id
     ORDER BY p.minute, p.second, p.event_id LIMIT @limit
     """
     cfg = bigquery.QueryJobConfig(
@@ -798,7 +856,7 @@ def plot_player_touch_kde_vertical(
     pitch_half: bool = False,
     fill: bool = True,
     levels: int = 100,
-    thresh: float = 0,
+    thresh: float = 0.03,
     cut: int = 4,
     colorbar: bool = True,
     cbar_label: str = "Density (KDE)",

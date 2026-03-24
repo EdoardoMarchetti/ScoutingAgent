@@ -92,11 +92,13 @@ def _render_viz_block(block: dict, fallback_title: str) -> bool:
     md_img = str(block.get("markdown_image") or "").strip()
     desc = str(block.get("description") or "").strip()
     caption = str(block.get("caption") or fallback_title).strip()
+    passes_table = block.get("passes_table")
+    has_passes_table = isinstance(passes_table, list)
 
-    if err and not md_img and not desc:
+    if err and not md_img and not desc and not has_passes_table:
         st.error(str(err))
         return True
-    if not md_img and not desc:
+    if not md_img and not desc and not has_passes_table:
         return False
 
     if caption and caption != fallback_title:
@@ -105,6 +107,15 @@ def _render_viz_block(block: dict, fallback_title: str) -> bool:
         _render_markdown_image(md_img)
     if desc:
         st.markdown(desc)
+    if has_passes_table:
+        with st.expander("Passaggi — tabella eventi (stessi filtri del grafico)", expanded=False):
+            if len(passes_table) == 0:
+                st.caption(
+                    "Nessuna riga: filtri attivi = recipient/passer id ≠ 0 e solo compagni "
+                    "(team dominante su silver_match_event = team_id evento passaggio)."
+                )
+            else:
+                st.dataframe(passes_table, use_container_width=True, hide_index=True)
     return True
 
 st.title("Player Scouting")
