@@ -107,15 +107,7 @@ def _render_viz_block(block: dict, fallback_title: str) -> bool:
         _render_markdown_image(md_img)
     if desc:
         st.markdown(desc)
-    if has_passes_table:
-        with st.expander("Passaggi — tabella eventi (stessi filtri del grafico)", expanded=False):
-            if len(passes_table) == 0:
-                st.caption(
-                    "Nessuna riga: filtri attivi = recipient/passer id ≠ 0 e solo compagni "
-                    "(team dominante su silver_match_event = team_id evento passaggio)."
-                )
-            else:
-                st.dataframe(passes_table, use_container_width=True, hide_index=True)
+    
     return True
 
 st.title("Player Scouting")

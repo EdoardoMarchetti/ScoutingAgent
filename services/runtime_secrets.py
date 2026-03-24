@@ -66,6 +66,42 @@ def ensure_google_application_credentials_file() -> None:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(p)
 
 
+def resolve_gcp_project_id() -> str:
+    """
+    Project id for Vertex / ADC. Streamlit Cloud often has JSON creds but no
+    GOOGLE_CLOUD_PROJECT env var — align with bigquery_client secret names.
+    """
+    for env_key in ("GOOGLE_CLOUD_PROJECT", "GCP_PROJECT", "GCLOUD_PROJECT"):
+        v = os.getenv(env_key, "").strip()
+        if v:
+            return v
+    for secret_key in ("GOOGLE_CLOUD_PROJECT", "GCP_PROJECT_ID", "BQ_PROJECT_ID"):
+        v = str(get_secret_value(secret_key, "") or "").strip()
+        if v:
+            return v
+    adc_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if adc_path and not adc_path.startswith("{") and Path(adc_path).is_file():
+        try:
+            with open(adc_path, encoding="utf-8") as handle:
+                info = json.load(handle)
+            pid = str(info.get("project_id") or "").strip()
+            if pid:
+                return pid
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+    return ""
+
+
+def ensure_google_cloud_project_env() -> None:
+    """Set GOOGLE_CLOUD_PROJECT so vertexai / aiplatform find the project on Cloud."""
+    if os.getenv("GOOGLE_CLOUD_PROJECT", "").strip():
+        return
+    pid = resolve_gcp_project_id()
+    if pid:
+        os.environ["GOOGLE_CLOUD_PROJECT"] = pid
+        os.environ.setdefault("GCP_PROJECT", pid)
+
+
 def get_secret_value(name: str, default: Any = "") -> Any:
     """Read a config value from env vars, then Streamlit secrets."""
     value = os.getenv(name)
