@@ -3,6 +3,8 @@ name: scouting_agent.gold_match_possession_llm_general
 type: python
 image: python:3.12
 connection: gcp
+tags:
+  - llm
 
 depends:
   - scouting_agent.gold_match_possession_llm_prompts

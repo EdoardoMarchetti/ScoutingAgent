@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -285,10 +286,16 @@ def fixture_window_dates() -> tuple[str | None, str | None]:
         if not val:
             return None
         if not _ISO_DATE.match(val):
-
             raise ValueError(
                 f"Invalid date format for {source}:{key}={raw!r}. Expected YYYY-MM-DD."
             )
+        try:
+            date.fromisoformat(val)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid calendar date for {source}:{key}={raw!r}. "
+                "Use a real calendar day (YYYY-MM-DD)."
+            ) from exc
         return val
 
     v = pipeline_vars()

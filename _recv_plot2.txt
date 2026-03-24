@@ -1,0 +1,391 @@
+# --- Stile condiviso passing-link + KDE ---
+PASS_VIZ_STAR_SIZE = 200
+PASS_VIZ_NODE_SIZE = 200
+PASS_VIZ_COUNT_FONTSIZE = 8
+PASS_VIZ_LINE_WHITE_LW = 5.0
+PASS_VIZ_LINE_COLOR_LW = 2.8
+PASS_VIZ_MARKERS = ["o", "s", "D", "^", "v"]
+PASS_VIZ_COLORS = ["#059669", "#1d4ed8", "#7c3aed", "#db2777", "#ea580c"]
+
+
+def _kde_mappable(ax, cmap, kde_return):
+    if kde_return is not None and not isinstance(kde_return, Axes):
+        if hasattr(kde_return, "cmap") and kde_return.cmap is not None:
+            return kde_return
+    for ch in ax.get_children():
+        if isinstance(ch, QuadContourSet) and ch.cmap is not None:
+            return ch
+    for coll in reversed(ax.collections):
+        if getattr(coll, "cmap", None) is not None:
+            return coll
+    sm = cm.ScalarMappable(norm=Normalize(0, 1), cmap=cmap)
+    sm.set_array(np.array([0, 1]))
+    return sm
+
+def _pitch_link_line(pitch, ax, x0, y0, x1, y1, color, z_white=18, z_col=19):
+    # Conforme alla API mplsoccer, lines accetta:
+    # pitch.lines(xstart, ystart, xend, yend, ax=..., color=..., **kwargs)
+    xa = np.asarray([float(x0)], dtype=float)
+    ya = np.asarray([float(y0)], dtype=float)
+    xb = np.asarray([float(x1)], dtype=float)
+    yb = np.asarray([float(y1)], dtype=float)
+
+    # Freccia bianca sotto (più spessa)
+    pitch.lines(
+        xa, ya, xb, yb,
+        ax=ax,
+        color="white",
+        linewidth=2.2,
+        zorder=z_white,
+        alpha=0.95,
+        comet=False,      # per compatibilità mplsoccer, default False
+        
+    )
+
+    # Freccia colorata sopra (più sottile)
+    pitch.lines(
+        xa, ya, xb, yb,
+        ax=ax,
+        color=color,
+        linewidth=1.1,
+        zorder=z_col,
+        alpha=1.0,
+        comet=False,
+        
+    )
+
+
+def plot_passing_links_kde_vertical(
+    df_passes: pd.DataFrame,
+    title: str,
+    *,
+    add_header_branding,
+    left_logo_path: str = "images/sport_data_campus.png",
+    team_img_source=None,
+    player_img_source=None,
+    pitch_half: bool = False,
+    top_k: int = 3,
+    figsize=(6.0, 8.0),
+    kde_cmap: str = "Blues",
+    kde_levels: int = 100,
+    kde_thresh: float = 0.035,
+    kde_cut: int = 4,
+    kde_bw_adjust: float = 1.5,
+    kde_alpha: float = 0.5,
+    show_kde_colorbar: bool = False,
+    header_title_fontsize: float = 17,
+    header_center_y: float = 0.93,
+) -> tuple[plt.Figure, plt.Axes]:
+    """
+    Target = passatore. KDE sulle partenze. Stella = media uscita palla.
+    Linee dalla stella alla media ricezione dei top_k riceventi.
+    """
+    d = df_passes.copy()
+    for c in ["start_x", "start_y", "end_x", "end_y"]:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    d = d.dropna(subset=["start_x", "start_y", "end_x", "end_y", "recipient_id"])
+    d = d[~((d["end_x"] == 0) & (d["end_y"] == 0))]
+    if len(d) < 3:
+        raise ValueError("Servono abbastanza passaggi con coordinate.")
+
+    passer_name = (
+        d["passer_name"].dropna().astype(str).iloc[0]
+        if "passer_name" in d.columns
+        else "Target"
+    )
+
+    sx = float(d["start_x"].median())
+    sy = float(d["start_y"].median())
+
+    g = (
+        d.groupby(["recipient_id", "recipient_name"], dropna=False)
+        .agg(n_pass=("event_id", "count"), rx=("end_x", "mean"), ry=("end_y", "mean"))
+        .reset_index()
+        .sort_values("n_pass", ascending=False)
+        .head(top_k)
+        .reset_index(drop=True)
+    )
+
+    pitch = VerticalPitch(
+        pitch_type="wyscout",
+        pitch_length=100,
+        pitch_width=100,
+        half=pitch_half,
+        pad_bottom=0.5,
+        goal_type="box",
+        goal_alpha=0.8,
+        pitch_color="white",
+        line_color="#000009",
+        line_zorder=4,
+    )
+    fig, ax = pitch.draw(figsize=figsize)
+    fig.patch.set_facecolor("white")
+    fig.subplots_adjust(left=0.07, right=0.94, top=0.86, bottom=0.20)
+
+    cmap_kde = plt.colormaps.get_cmap(kde_cmap).copy()
+    cmap_kde.set_under("#ffffff")
+
+    kde_ret = pitch.kdeplot(
+        d["start_x"],
+        d["start_y"],
+        ax=ax,
+        fill=True,
+        levels=kde_levels,
+        thresh=kde_thresh,
+        cut=kde_cut,
+        cmap=cmap_kde,
+        bw_adjust=kde_bw_adjust,
+        zorder=1,
+        alpha=kde_alpha,
+    )
+    for coll in ax.collections:
+        if coll.get_zorder() < 10:
+            coll.set_zorder(2)
+
+    if show_kde_colorbar:
+        m = _kde_mappable(ax, cmap_kde, kde_ret)
+        cb = fig.colorbar(m, ax=ax, shrink=0.5, pad=0.02)
+        cb.set_label("Densità partenze", fontsize=9)
+
+    
+
+    pitch.scatter(
+        sx, sy,
+        s=PASS_VIZ_STAR_SIZE,
+        marker="*",
+        c="#e63946",
+        edgecolors="#000009",
+        linewidths=1.3,
+        zorder=30,
+        ax=ax,
+        label=f"{passer_name} (target)",
+    )
+
+    for j, (_, row) in enumerate(g.iterrows()):
+        rx, ry = float(row["rx"]), float(row["ry"])
+        n = int(row["n_pass"])
+        rname = str(row["recipient_name"]) if pd.notna(row["recipient_name"]) else f"id {int(row['recipient_id'])}"
+        mc = PASS_VIZ_COLORS[j % len(PASS_VIZ_COLORS)]
+        mk = PASS_VIZ_MARKERS[j % len(PASS_VIZ_MARKERS)]
+
+        _pitch_link_line(pitch, ax, sx, sy, rx, ry, mc)
+
+        pitch.scatter(
+            rx, ry,
+            s=PASS_VIZ_NODE_SIZE,
+            marker=mk,
+            facecolors=mc,
+            edgecolors="#000009",
+            linewidths=1.4,
+            zorder=28,
+            ax=ax,
+            label=f"{rname} · {n} pass",
+        )
+        pitch.text(
+            rx, ry, str(n),
+            ax=ax,
+            ha="center", va="center",
+            fontsize=PASS_VIZ_COUNT_FONTSIZE,
+            color="white", weight="bold",
+            zorder=35,
+        )
+
+    leg = ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.07),
+        ncol=min(2, top_k + 1),
+        frameon=True,
+        fancybox=True,
+        framealpha=0.96,
+        edgecolor="#cccccc",
+        facecolor="white",
+        fontsize=8.5,
+    )
+    for t in leg.get_texts():
+        t.set_color("#222222")
+
+    add_header_branding(
+        fig,
+        title=title,
+        left_logo_path=left_logo_path,
+        team_img_source=team_img_source,
+        player_img_source=player_img_source,
+        header_center_y=header_center_y,
+    )
+
+    return fig, ax
+
+
+def plot_received_passing_links_kde_vertical(
+    df_passes: pd.DataFrame,
+    title: str,
+    *,
+    add_header_branding,
+    left_logo_path: str = "images/sport_data_campus.png",
+    team_img_source=None,
+    player_img_source=None,
+    pitch_half: bool = False,
+    top_k: int = 3,
+    figsize=(6.0, 8.0),
+    kde_cmap: str = "Blues",
+    kde_levels: int = 100,
+    kde_thresh: float = 0.035,
+    kde_cut: int = 4,
+    kde_bw_adjust: float = 1.5,
+    kde_alpha: float = 0.5,
+    show_kde_colorbar: bool = False,
+    header_title_fontsize: float = 17,
+    header_center_y: float = 0.93,
+    converge_lines_to_target: bool = True,
+) -> tuple[plt.Figure, plt.Axes]:
+    """
+    Target = ricevente. KDE sulle ricezioni (end_x, end_y).
+    Stella = media ricezione globale.
+    Marker sui top_k passatori = media partenza dei loro passi verso il target.
+    Linea: da (sx,sy) passatore a (tx,ty) stella se converge_lines_to_target,
+           altrimenti a (ex,ey) media ricezione solo per quel passatore.
+    """
+    d = df_passes.copy()
+    for c in ["start_x", "start_y", "end_x", "end_y"]:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    d = d.dropna(subset=["start_x", "start_y", "end_x", "end_y", "passer_id"])
+    d = d[~((d["end_x"] == 0) & (d["end_y"] == 0))]
+    if len(d) < 3:
+        raise ValueError("Servono abbastanza passaggi ricevuti con coordinate.")
+
+    target_name = (
+        d["target_name"].dropna().astype(str).iloc[0]
+        if "target_name" in d.columns
+        else "Target"
+    )
+
+    tx = float(d["end_x"].median())
+    ty = float(d["end_y"].median())
+
+    g = (
+        d.groupby(["passer_id", "passer_name"], dropna=False)
+        .agg(
+            n_pass=("event_id", "count"),
+            sx=("start_x", "mean"),
+            sy=("start_y", "mean"),
+            ex=("end_x", "mean"),
+            ey=("end_y", "mean"),
+        )
+        .reset_index()
+        .sort_values("n_pass", ascending=False)
+        .head(top_k)
+        .reset_index(drop=True)
+    )
+
+    pitch = VerticalPitch(
+        pitch_type="wyscout",
+        pitch_length=100,
+        pitch_width=100,
+        half=pitch_half,
+        pad_bottom=0.5,
+        goal_type="box",
+        goal_alpha=0.8,
+        pitch_color="white",
+        line_color="#000009",
+        line_zorder=4,
+    )
+    fig, ax = pitch.draw(figsize=figsize)
+    fig.patch.set_facecolor("white")
+    fig.subplots_adjust(left=0.07, right=0.94, top=0.86, bottom=0.20)
+
+    cmap_kde = plt.colormaps.get_cmap(kde_cmap).copy()
+    cmap_kde.set_under("#ffffff")
+
+    kde_ret = pitch.kdeplot(
+        d["end_x"],
+        d["end_y"],
+        ax=ax,
+        fill=True,
+        levels=kde_levels,
+        thresh=kde_thresh,
+        cut=kde_cut,
+        cmap=cmap_kde,
+        bw_adjust=kde_bw_adjust,
+        zorder=1,
+        alpha=kde_alpha,
+    )
+    for coll in ax.collections:
+        if coll.get_zorder() < 10:
+            coll.set_zorder(2)
+
+    if show_kde_colorbar:
+        m = _kde_mappable(ax, cmap_kde, kde_ret)
+        cb = fig.colorbar(m, ax=ax, shrink=0.5, pad=0.02)
+        cb.set_label("Densità ricezioni", fontsize=9)
+
+    
+
+    pitch.scatter(
+        tx, ty,
+        s=PASS_VIZ_STAR_SIZE,
+        marker="*",
+        c="#e63946",
+        edgecolors="#000009",
+        linewidths=1.3,
+        zorder=30,
+        ax=ax,
+        label=f"{target_name} · media ricezione",
+    )
+
+    for j, (_, row) in enumerate(g.iterrows()):
+        sx = float(row["sx"])
+        sy = float(row["sy"])
+        ex = float(row["ex"])
+        ey = float(row["ey"])
+        n = int(row["n_pass"])
+        pname = str(row["passer_name"]) if pd.notna(row["passer_name"]) else f"id {int(row['passer_id'])}"
+        mc = PASS_VIZ_COLORS[j % len(PASS_VIZ_COLORS)]
+        mk = PASS_VIZ_MARKERS[j % len(PASS_VIZ_MARKERS)]
+
+        x1, y1 = (tx, ty) if converge_lines_to_target else (ex, ey)
+        _pitch_link_line(pitch, ax, sx, sy, x1, y1, mc)
+
+        pitch.scatter(
+            sx, sy,
+            s=PASS_VIZ_NODE_SIZE,
+            marker=mk,
+            facecolors=mc,
+            edgecolors="#000009",
+            linewidths=1.4,
+            zorder=28,
+            ax=ax,
+            label=f"{pname} · {n} pass",
+        )
+        pitch.text(
+            sx, sy, str(n),
+            ax=ax,
+            ha="center", va="center",
+            fontsize=PASS_VIZ_COUNT_FONTSIZE,
+            color="white", weight="bold",
+            zorder=35,
+        )
+
+    leg = ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.07),
+        ncol=min(2, top_k + 1),
+        frameon=True,
+        fancybox=True,
+        framealpha=0.96,
+        edgecolor="#cccccc",
+        facecolor="white",
+        fontsize=8.5,
+    )
+    for t in leg.get_texts():
+        t.set_color("#222222")
+
+    add_header_branding(
+        fig,
+        title=title,
+        left_logo_path=left_logo_path,
+        team_img_source=team_img_source,
+        player_img_source=player_img_source,
+        header_center_y=header_center_y,
+    )
+
+    return fig, ax

@@ -15,10 +15,10 @@ variables:
     default: 191659 #La Liga 25/26
   match_from_date:
     type: string
-    default: "2026-03-01"
+    default: "2025-07-01"
   match_to_date:
     type: string
-    default: "2026-03-10"
+    default: "2026-06-31"
   fixture_details:
     type: string
     default: "matches"

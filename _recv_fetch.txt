@@ -1,0 +1,56 @@
+def fetch_target_received_passes(
+    match_id: int,
+    target_player_id: int,
+    *,
+    project_id: str | None = None,
+    dataset: str = "scouting_agent",
+    limit: int = 50000,
+) -> pd.DataFrame:
+    """
+    Passaggi in cui recipient = target_player_id.
+    start_* = da dove passa il compagno; end_* = dove riceve il target.
+    """
+    import os
+    from google.cloud import bigquery
+
+    pid = project_id or os.environ.get("GCP_PROJECT_ID")
+    if not pid:
+        raise ValueError("GCP_PROJECT_ID o project_id=")
+
+    lim = max(1, min(int(limit), 100_000))
+    fq = f"`{pid}.{dataset}.gold_match_pass_event`"
+    dp = f"`{pid}.{dataset}.dim_player`"
+
+    sql = f"""
+    SELECT
+      p.match_id,
+      p.event_id,
+      p.minute,
+      p.second,
+      p.location_x AS start_x,
+      p.location_y AS start_y,
+      p.pass_end_x AS end_x,
+      p.pass_end_y AS end_y,
+      p.player_id AS passer_id,
+      pas.short_name AS passer_name,
+      p.recipient_player_id AS target_id,
+      tar.short_name AS target_name
+    FROM {fq} AS p
+    LEFT JOIN {dp} AS pas ON p.player_id = pas.player_id
+    LEFT JOIN {dp} AS tar ON p.recipient_player_id = tar.player_id
+    WHERE p.match_id = @match_id
+      AND p.recipient_player_id = @target_player_id
+      AND p.player_id IS NOT NULL
+      AND p.pass_end_x IS NOT NULL
+      AND p.pass_end_y IS NOT NULL
+    ORDER BY p.minute, p.second, p.event_id
+    LIMIT @limit
+    """
+    cfg = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("match_id", "INT64", int(match_id)),
+            bigquery.ScalarQueryParameter("target_player_id", "INT64", int(target_player_id)),
+            bigquery.ScalarQueryParameter("limit", "INT64", lim),
+        ]
+    )
+    return bigquery.Client(project=pid).query(sql, job_config=cfg).to_dataframe()

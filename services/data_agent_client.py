@@ -39,34 +39,131 @@ def _get_access_token() -> str:
     return token
 
 
-def _extract_answer(messages: list[dict[str, Any]]) -> str:
-    final_parts: list[str] = []
-    generic_parts: list[str] = []
+def _extract_content_blocks(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extract an ordered list of content blocks preserving original message order."""
+    blocks: list[dict[str, Any]] = []
+    final_text_blocks: list[dict[str, Any]] = []
+    generic_text_blocks: list[dict[str, Any]] = []
+    sql_queries: list[str] = []
+    has_final = False
+
     for msg in messages:
         system = msg.get("systemMessage") or {}
-        text = system.get("text") or {}
-        parts = text.get("parts") or []
-        text_type = str(text.get("textType") or "").strip()
-        if not isinstance(parts, list):
-            continue
+        group_id = msg.get("groupId") or system.get("groupId")
 
-        clean_parts = [str(p).strip() for p in parts if str(p).strip()]
-        if not clean_parts:
-            continue
+        text_msg = system.get("text") or {}
+        parts = text_msg.get("parts") or []
+        text_type = str(text_msg.get("textType") or "").strip()
+        if isinstance(parts, list):
+            clean = "\n".join(str(p).strip() for p in parts if str(p).strip())
+            if clean:
+                block = {"type": "text", "content": clean, "group_id": group_id}
+                if text_type == "FINAL_RESPONSE":
+                    has_final = True
+                    final_text_blocks.append(block)
+                elif text_type not in {"THOUGHT", "PROGRESS"}:
+                    generic_text_blocks.append(block)
 
-        if text_type == "FINAL_RESPONSE":
-            final_parts.extend(clean_parts)
-        elif text_type in {"THOUGHT", "PROGRESS"}:
-            # Explicitly ignore reasoning/progress messages.
-            continue
+        chart_msg = system.get("chart")
+        if isinstance(chart_msg, dict):
+            result = chart_msg.get("result") or {}
+            vega_config = result.get("vegaConfig")
+            image_blob = result.get("image") or {}
+            image_data = image_blob.get("data")
+            image_mime = image_blob.get("mimeType", "image/png")
+            if vega_config or image_data:
+                blocks.append({
+                    "type": "chart",
+                    "vega_config": vega_config,
+                    "image_base64": image_data,
+                    "image_mime": image_mime,
+                    "group_id": group_id,
+                })
+
+        data_msg = system.get("data")
+        if isinstance(data_msg, dict):
+            generated_sql = data_msg.get("generatedSql")
+            if generated_sql and isinstance(generated_sql, str) and generated_sql.strip():
+                sql_queries.append(generated_sql.strip())
+
+            result = data_msg.get("result") or {}
+            rows = result.get("data")
+            schema = result.get("schema")
+            name = result.get("name", "")
+            if isinstance(rows, list) and rows:
+                blocks.append({
+                    "type": "table",
+                    "name": name,
+                    "schema": schema,
+                    "data": rows,
+                    "group_id": group_id,
+                })
+
+        analysis_msg = system.get("analysis")
+        if isinstance(analysis_msg, dict):
+            event = analysis_msg.get("progressEvent") or {}
+
+            vega_json_str = event.get("resultVegaChartJson")
+            if isinstance(vega_json_str, str) and vega_json_str.strip():
+                try:
+                    vega_spec = json.loads(vega_json_str)
+                    blocks.append({
+                        "type": "chart",
+                        "vega_config": vega_spec,
+                        "image_base64": None,
+                        "image_mime": None,
+                        "group_id": group_id,
+                    })
+                except json.JSONDecodeError:
+                    pass
+
+            csv_data = event.get("resultCsvData")
+            if isinstance(csv_data, str) and csv_data.strip():
+                blocks.append({
+                    "type": "table",
+                    "name": "analysis_result",
+                    "schema": None,
+                    "csv": csv_data,
+                    "data": None,
+                    "group_id": group_id,
+                })
+
+    text_blocks = final_text_blocks if has_final else generic_text_blocks
+
+    ordered = _interleave_text_with_visuals(text_blocks, blocks)
+    return ordered, sql_queries
+
+
+def _interleave_text_with_visuals(
+    text_blocks: list[dict[str, Any]],
+    visual_blocks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Interleave text and visual blocks by group_id when possible, else by order."""
+    group_visuals: dict[Any, list[dict[str, Any]]] = {}
+    ungrouped_visuals: list[dict[str, Any]] = []
+    for vb in visual_blocks:
+        gid = vb.get("group_id")
+        if gid is not None:
+            group_visuals.setdefault(gid, []).append(vb)
         else:
-            generic_parts.extend(clean_parts)
+            ungrouped_visuals.append(vb)
 
-    if final_parts:
-        return "\n".join(final_parts).strip()
-    if generic_parts:
-        return "\n".join(generic_parts).strip()
-    return ""
+    emitted_groups: set[Any] = set()
+    ordered: list[dict[str, Any]] = []
+
+    for tb in text_blocks:
+        ordered.append(tb)
+        gid = tb.get("group_id")
+        if gid is not None and gid in group_visuals and gid not in emitted_groups:
+            ordered.extend(group_visuals[gid])
+            emitted_groups.add(gid)
+
+    for gid, vbs in group_visuals.items():
+        if gid not in emitted_groups:
+            ordered.extend(vbs)
+
+    ordered.extend(ungrouped_visuals)
+    return ordered
 
 
 def query_data_agent(user_message: str, use_conversation_context: bool = False) -> dict[str, Any]:
@@ -96,17 +193,18 @@ def query_data_agent(user_message: str, use_conversation_context: bool = False) 
     response = requests.post(url, json=body, headers=headers, timeout=120)
     response.raise_for_status()
 
-    answer_text = ""
     payload: Any
     try:
         payload = response.json()
         if isinstance(payload, list):
-            answer_text = _extract_answer([p for p in payload if isinstance(p, dict)])
+            msgs = [p for p in payload if isinstance(p, dict)]
         elif isinstance(payload, dict):
-            answer_text = _extract_answer([payload])
+            msgs = [payload]
+        else:
+            msgs = []
     except ValueError:
-        # Fallback for streamed newline-delimited JSON.
-        chunks: list[dict[str, Any]] = []
+        msgs = []
+        payload = []
         for line in response.text.splitlines():
             line = line.strip()
             if not line:
@@ -116,12 +214,18 @@ def query_data_agent(user_message: str, use_conversation_context: bool = False) 
             except json.JSONDecodeError:
                 continue
             if isinstance(obj, dict):
-                chunks.append(obj)
-        answer_text = _extract_answer(chunks)
-        payload = chunks
+                msgs.append(obj)
+        payload = msgs
+
+    content_blocks, sql_queries = _extract_content_blocks(msgs)
+
+    text_parts = [b["content"] for b in content_blocks if b["type"] == "text"]
+    answer_text = "\n".join(text_parts).strip()
 
     return {
         "answer_text": answer_text,
+        "content_blocks": content_blocks,
+        "sql_queries": sql_queries,
         "raw_response": payload,
         "error": "",
     }
