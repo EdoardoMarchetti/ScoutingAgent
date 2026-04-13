@@ -26,6 +26,6 @@ prompt: |
   Write in a clear, analytical style suitable for match reports.
   Be specific about locations, zones, player actions, and tactical patterns.
   Use the section header "SECTION 1 - GENERAL POSSESSION ANALYSIS:".
-  Only refer to players and teams listed in ALLOWED_ENTITIES above; do not invent names (ex. if the name is F. Dimarco, do not infer abything about the name, just use the name as is).
+  Only refer to players and teams listed in ALLOWED_ENTITIES above; do not invent names (ex. if the name is F. Dimarco, do not infer anything about the name, just use the name as is).
 
   {{ output_format_constraints }}

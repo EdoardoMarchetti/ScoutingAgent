@@ -33,7 +33,7 @@ def _build_viz_descriptions_for_report(state: ScoutingReportState) -> str:
     viz_keys: list[tuple[str, str]] = [
         ("duels_visualizations", "Duels"),
         ("recoveries_and_interceptions_visualization", "Recoveries & Interceptions"),
-        ("pass_sonar_visualization", "Touch density (build-up zones)"),
+        ("player_heatmap", "Touch density (build-up zones)"),
         ("pass_start_network_visualization", "Pass Start Heatmap with Network"),
         ("receiving_network_visualization", "Receiving Heatmap with Network"),
         ("shot_map_visualization", "Shot Map"),
@@ -162,7 +162,7 @@ def node_scout(state: ScoutingReportState):
                 defensive_descs.append(d)
 
     buildup_descs = []
-    for k in ("pass_sonar_visualization", "pass_start_network_visualization", "receiving_network_visualization"):
+    for k in ("player_heatmap", "pass_start_network_visualization", "receiving_network_visualization"):
         p = state.get(k)
         if isinstance(p, dict) and not p.get("error"):
             d = (p.get("description") or "").strip()
@@ -253,7 +253,7 @@ def initial_scouting_state(
         "statistical_summary": "",
         "duels_visualizations": {},
         "recoveries_and_interceptions_visualization": {},
-        "pass_sonar_visualization": {},
+        "player_heatmap": {},
         "pass_start_network_visualization": {},
         "receiving_network_visualization": {},
         "shot_map_visualization": {},

@@ -26,7 +26,7 @@ class ScoutingReportState(TypedDict):
     # Visualizations (each: markdown_image, description, caption, events, optional error)
     duels_visualizations: dict[str, Any]
     recoveries_and_interceptions_visualization: dict[str, Any]
-    pass_sonar_visualization: dict[str, Any]
+    player_heatmap: dict[str, Any]
     pass_start_network_visualization: dict[str, Any]
     receiving_network_visualization: dict[str, Any]
     shot_map_visualization: dict[str, Any]

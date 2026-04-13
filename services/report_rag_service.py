@@ -102,7 +102,7 @@ def load_reports_from_directory(reports_dir: Path) -> list[Document]:
             # Visualization descriptions
             viz_descriptions = []
             for key in ["duels_visualizations", "recoveries_and_interceptions_visualization",
-                        "pass_sonar_visualization", "pass_start_network_visualization",
+                        "player_heatmap", "pass_start_network_visualization",
                         "receiving_network_visualization", "shot_map_visualization",
                         "crosses_map_visualization"]:
                 viz_block = report_data.get(key, {})

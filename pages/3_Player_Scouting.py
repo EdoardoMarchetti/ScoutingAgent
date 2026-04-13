@@ -64,7 +64,7 @@ PHASE_VIZ: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "Build-up phase",
         [
-            ("pass_sonar_visualization", "Touch density"),
+            ("player_heatmap", "Touch density"),
             ("pass_start_network_visualization", "Pass start + network"),
             ("receiving_network_visualization", "Receiving + network"),
         ],
@@ -379,9 +379,9 @@ if SESSION_RESULT_KEY in st.session_state and SESSION_CONTEXT_KEY in st.session_
                     "description": str(result.get("recoveries_and_interceptions_visualization", {}).get("description") or ""),
                     "caption": str(result.get("recoveries_and_interceptions_visualization", {}).get("caption") or ""),
                 },
-                "pass_sonar_visualization": {
-                    "description": str(result.get("pass_sonar_visualization", {}).get("description") or ""),
-                    "caption": str(result.get("pass_sonar_visualization", {}).get("caption") or ""),
+                "player_heatmap": {
+                    "description": str(result.get("player_heatmap", {}).get("description") or ""),
+                    "caption": str(result.get("player_heatmap", {}).get("caption") or ""),
                 },
                 "pass_start_network_visualization": {
                     "description": str(result.get("pass_start_network_visualization", {}).get("description") or ""),

@@ -377,14 +377,14 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
     except Exception as exc:
         out["receiving_network_visualization"] = _empty_viz(str(exc))
 
-    # Touch density (fills pass_sonar slot — no sonar in scouting_viz)
+    # Touch density heatmap (no sonar in scouting_viz)
     try:
         df_t = fetch_match_touch_events(match_id, player_id, project_id=project_id, limit=20_000)
         summary = summarize_touches_df(df_t)
         structured = structured_json_for_llm(summary)
         dloc = df_t.dropna(subset=["location_x", "location_y"])
         if len(dloc) < 3:
-            out["pass_sonar_visualization"] = {
+            out["player_heatmap"] = {
                 "markdown_image": "",
                 "description": _llm_describe(
                     llm,
@@ -423,14 +423,14 @@ def node_build_up_visualizations(state: ScoutingReportState) -> dict[str, Any]:
                 ),
                 report_language,
             )
-            out["pass_sonar_visualization"] = {
+            out["player_heatmap"] = {
                 "markdown_image": md,
                 "description": desc,
                 "caption": _tr(report_language, "touch_caption"),
                 "events": summary.get("sample_events", []),
             }
     except Exception as exc:
-        out["pass_sonar_visualization"] = _empty_viz(str(exc))
+        out["player_heatmap"] = _empty_viz(str(exc))
 
     return out
 

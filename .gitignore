@@ -101,3 +101,26 @@ logs/*.log
 # Player reports (JSON files for RAG, PDFs)
 player_reports/
 !player_reports/.gitkeep
+
+# LaTeX thesis artifacts
+chapters/**/*.aux
+thesis/*.aux
+thesis/*.log
+thesis/*.out
+thesis/*.toc
+thesis/*.lof
+thesis/*.lot
+thesis/*.fls
+thesis/*.fdb_latexmk
+thesis/*.synctex.gz
+thesis/*.bbl
+thesis/*.blg
+thesis/*.bcf
+thesis/*.run.xml
+thesis/*.lol
+thesis/*.pdf
+thesis/chapters/*.aux
+thesis/notes/*
+thesis/*
+
+.cursor/*

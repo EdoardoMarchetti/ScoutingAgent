@@ -67,7 +67,7 @@ from wyscout_dimension_scope import (  # noqa: E402
     wyscout_gcs_bucket_name,
 )
 
-# Primo tentativo + 5 retry = fino a 6 GET per match.
+# First attempt + 5 retries = 6 GET per match.
 _API_RETRIES = 5
 _API_BACKOFF_BASE_S = 0.6
 _MAX_DOWNLOAD_WORKERS = 16

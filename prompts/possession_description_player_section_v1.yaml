@@ -32,6 +32,6 @@ prompt: |
 
   Write ONLY the "SECTION 2 - TARGET PLAYER IMPACT ANALYSIS:" section. In continuous prose (not as a list), cover this player's role and impact: actions and decisions; positioning and movement; contribution to team play; effectiveness; influence on the outcome; tactical significance. Ground your analysis in the full event sequence and metrics when relevant, not only the filtered JSON.
 
-  Write in a clear, analytical style. Be specific about locations and actions. Start with the section header "SECTION 2 - TARGET PLAYER IMPACT ANALYSIS:". Only refer to players and teams listed in ALLOWED_ENTITIES above; do not invent names (ex. if the name is F. Dimarco, do not infer abything about the name, just use the name as is).
+  Write in a clear, analytical style. Be specific about locations and actions. Start with the section header "SECTION 2 - TARGET PLAYER IMPACT ANALYSIS:". Only refer to players and teams listed in ALLOWED_ENTITIES above; do not invent names (ex. if the name is F. Dimarco, do not infer anything about the name, just use the name as is).
 
   {{ output_format_constraints }}
